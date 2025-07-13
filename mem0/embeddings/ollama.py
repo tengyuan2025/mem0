@@ -8,16 +8,12 @@ from mem0.embeddings.base import EmbeddingBase
 try:
     from ollama import Client
 except ImportError:
-    user_input = input("The 'ollama' library is required. Install it now? [y/N]: ")
-    if user_input.lower() == "y":
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "ollama"])
-            from ollama import Client
-        except subprocess.CalledProcessError:
-            print("Failed to install 'ollama'. Please install it manually using 'pip install ollama'.")
-            sys.exit(1)
-    else:
-        print("The required 'ollama' library is not installed.")
+    # 在Docker环境中自动安装，不等待用户输入
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "ollama"])
+        from ollama import Client
+    except subprocess.CalledProcessError:
+        print("Failed to install 'ollama'. Please install it manually using 'pip install ollama'.")
         sys.exit(1)
 
 
