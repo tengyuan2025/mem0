@@ -6,6 +6,7 @@ from mem0.embeddings.configs import EmbedderConfig
 from mem0.vector_stores.configs import VectorStoreConfig
 import os
 import logging
+import traceback
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +63,7 @@ def init_memory():
                 logger.info("Memory initialized successfully")
     except Exception as e:
         logger.error(f"Error initializing memory: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         # 可以选择重新抛出异常或者返回None
         raise e
     return memory_instance
@@ -75,6 +77,7 @@ def get_client():
         return memory_instance
     except Exception as e:
         logger.error(f"Error getting memory client: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         # 返回None或者抛出异常，取决于你的错误处理策略
         raise e
 
