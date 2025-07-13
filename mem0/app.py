@@ -90,7 +90,9 @@ def list_memory():
     try:
         user_id = request.args.get('user_id')
         print("123333", user_id)
-        results = get_client().get_all(user_id=user_id)
+        client = get_client()
+        print("456656", client)
+        results = client.get_all(user_id=user_id)
         return jsonify({'status': 'success', 'results': results})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
