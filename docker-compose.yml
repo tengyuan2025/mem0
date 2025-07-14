@@ -2,26 +2,32 @@ version: '3.8'
 
 services:
   ollama:
-    image: ollama/ollama
+    image: ollama/ollama:latest
     container_name: ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_MODELS=mxbai-embed-large
-    restart: always
+    restart: unless-stopped
+    networks:
+      - mem0-network
 
   mem0-app:
     build: .
     container_name: mem0-app
     ports:
       - "80:80"
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
       - ollama
-    restart: always
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    restart: unless-stopped
+    networks:
+      - mem0-network
 
 volumes:
-  ollama_data: 
+  ollama_data:
+
+networks:
+  mem0-network:
+    driver: bridge 

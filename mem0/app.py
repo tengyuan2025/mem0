@@ -40,7 +40,7 @@ def init_memory():
                     "config": {
                         "model": "mxbai-embed-large:latest",
                         "embedding_dims": 1024,
-                        "ollama_base_url": "http://localhost:11434"
+                        "ollama_base_url": "http://ollama:11434"
                     }
                 }
 
