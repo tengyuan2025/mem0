@@ -9,11 +9,11 @@ try:
     from ollama import Client
 except ImportError:
     # 在Docker环境中自动安装，不等待用户输入
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "ollama"])
-        from ollama import Client
-    except subprocess.CalledProcessError:
-        print("Failed to install 'ollama'. Please install it manually using 'pip install ollama'.")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "ollama"])
+            from ollama import Client
+        except subprocess.CalledProcessError:
+            print("Failed to install 'ollama'. Please install it manually using 'pip install ollama'.")
         sys.exit(1)
 
 

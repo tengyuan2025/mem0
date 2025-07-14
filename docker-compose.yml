@@ -13,7 +13,7 @@ services:
       - mem0-network
 
   mem0-app:
-    build: .
+    image: mem0-app:latest
     container_name: mem0-app
     ports:
       - "80:80"
