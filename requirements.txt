@@ -1,12 +1,16 @@
 flask
 pydantic
-qdrant-client
+qdrant-client>=1.9.1
 numpy
 requests
 httpx
 tqdm
 typing-extensions
-ollama
+ollama>=0.1.0
+openai>=1.33.0
+posthog>=3.5.0
+pytz>=2024.1
+sqlalchemy>=2.0.31
 # 以下为可选依赖，按需取消注释
 # pymilvus
 # chromadb
