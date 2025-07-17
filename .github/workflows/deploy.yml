@@ -36,9 +36,20 @@ jobs:
           key: ${{ secrets.ALIYUN_SSH_KEY }}
           script: |
             docker load < ~/mem0-app.tar
+            # 强制停止所有相关容器
             docker stop ollama mem0-app || true
             docker rm ollama mem0-app || true
+            # 停止 docker-compose 服务
             docker-compose down || true
+            # 杀死占用 11434 端口的进程
+            sudo fuser -k 11434/tcp || true
+            # 清理所有 ollama 相关进程
+            sudo pkill -f ollama || true
+            # 等待进程完全结束
+            sleep 5
+            # 启动服务
             docker-compose up -d
-            sleep 10
+            # 等待 ollama 容器完全启动
+            sleep 15
+            # 拉取模型
             docker exec ollama ollama pull mxbai-embed-large:latest || true 
