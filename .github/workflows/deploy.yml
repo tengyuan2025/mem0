@@ -36,6 +36,9 @@ jobs:
           key: ${{ secrets.ALIYUN_SSH_KEY }}
           script: |
             docker load < ~/mem0-app.tar
+            docker stop ollama mem0-app || true
+            docker rm ollama mem0-app || true
             docker-compose down || true
             docker-compose up -d
-            docker exec -it ollama ollama pull mxbai-embed-large:latest || true 
+            sleep 10
+            docker exec ollama ollama pull mxbai-embed-large:latest || true 
