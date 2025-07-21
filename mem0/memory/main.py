@@ -303,7 +303,7 @@ class Memory(MemoryBase):
 
                 msg_content = message_dict["content"]
                 msg_embeddings = self.embedding_model.embed(msg_content, "add")
-                mem_id = self._create_memory(msg_content, msg_embeddings, per_msg_meta)
+                mem_id = self._create_memory(msg_content, msg_embeddings, per_msg_meta, original_text=msg_content)
 
                 returned_memories.append(
                     {
@@ -407,6 +407,7 @@ class Memory(MemoryBase):
                             data=action_text,
                             existing_embeddings=new_message_embeddings,
                             metadata=deepcopy(metadata),
+                            original_text=parsed_messages,
                         )
                         returned_memories.append({"id": memory_id, "memory": action_text, "event": event_type})
                     elif event_type == "UPDATE":
@@ -482,7 +483,7 @@ class Memory(MemoryBase):
             "role",
         ]
 
-        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", *promoted_payload_keys}
+        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", "original_text", *promoted_payload_keys}
 
         result_item = MemoryItem(
             id=memory.id,
@@ -491,6 +492,28 @@ class Memory(MemoryBase):
             created_at=memory.payload.get("created_at"),
             updated_at=memory.payload.get("updated_at"),
         ).model_dump()
+
+        # Add text field with memory data (not original_text), decode unicode escapes
+        text_content = memory.payload["data"]
+        try:
+            # Try to decode unicode escapes if present for text field
+            if isinstance(text_content, str) and '\\u' in text_content:
+                import codecs
+                result_item["text"] = codecs.decode(text_content, 'unicode_escape')
+            else:
+                result_item["text"] = text_content
+        except (UnicodeDecodeError, AttributeError):
+            # If decoding fails, use original content
+            result_item["text"] = text_content
+        
+        # Keep memory field in original escaped format
+        memory_data = memory.payload["data"]
+        if isinstance(memory_data, str) and not '\\u' in memory_data:
+            # If memory_data is already decoded, encode it back to unicode escapes
+            result_item["memory"] = memory_data.encode('unicode_escape').decode('ascii')
+        else:
+            # Keep original format
+            result_item["memory"] = memory_data
 
         for key in promoted_payload_keys:
             if key in memory.payload:
@@ -585,7 +608,7 @@ class Memory(MemoryBase):
             "actor_id",
             "role",
         ]
-        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", *promoted_payload_keys}
+        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", "original_text", *promoted_payload_keys}
 
         formatted_memories = []
         for mem in actual_memories:
@@ -596,6 +619,28 @@ class Memory(MemoryBase):
                 created_at=mem.payload.get("created_at"),
                 updated_at=mem.payload.get("updated_at"),
             ).model_dump(exclude={"score"})
+
+            # Add text field with memory data (not original_text), decode unicode escapes
+            text_content = mem.payload["data"]
+            try:
+                # Try to decode unicode escapes if present for text field
+                if isinstance(text_content, str) and '\\u' in text_content:
+                    import codecs
+                    memory_item_dict["text"] = codecs.decode(text_content, 'unicode_escape')
+                else:
+                    memory_item_dict["text"] = text_content
+            except (UnicodeDecodeError, AttributeError):
+                # If decoding fails, use original content
+                memory_item_dict["text"] = text_content
+            
+            # Keep memory field in original escaped format
+            memory_data = mem.payload["data"]
+            if isinstance(memory_data, str) and not '\\u' in memory_data:
+                # If memory_data is already decoded, encode it back to unicode escapes
+                memory_item_dict["memory"] = memory_data.encode('unicode_escape').decode('ascii')
+            else:
+                # Keep original format
+                memory_item_dict["memory"] = memory_data
 
             for key in promoted_payload_keys:
                 if key in mem.payload:
@@ -800,7 +845,7 @@ class Memory(MemoryBase):
         capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "sync"})
         return self.db.get_history(memory_id)
 
-    def _create_memory(self, data, existing_embeddings, metadata=None):
+    def _create_memory(self, data, existing_embeddings, metadata=None, original_text=None):
         logging.debug(f"Creating memory with {data=}")
         if data in existing_embeddings:
             embeddings = existing_embeddings[data]
@@ -809,8 +854,10 @@ class Memory(MemoryBase):
         memory_id = str(uuid.uuid4())
         metadata = metadata or {}
         metadata["data"] = data
+        if original_text:
+            metadata["original_text"] = original_text
         metadata["hash"] = hashlib.md5(data.encode()).hexdigest()
-        metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).isoformat()
+        metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).strftime('%Y-%m-%d %H:%M:%S')
 
         self.vector_store.insert(
             vectors=[embeddings],
@@ -1135,7 +1182,7 @@ class AsyncMemory(MemoryBase):
 
                 msg_content = message_dict["content"]
                 msg_embeddings = await asyncio.to_thread(self.embedding_model.embed, msg_content, "add")
-                mem_id = await self._create_memory(msg_content, msg_embeddings, per_msg_meta)
+                mem_id = await self._create_memory(msg_content, msg_embeddings, per_msg_meta, original_text=msg_content)
 
                 returned_memories.append(
                     {
@@ -1237,6 +1284,7 @@ class AsyncMemory(MemoryBase):
                                 data=action_text,
                                 existing_embeddings=new_message_embeddings,
                                 metadata=deepcopy(metadata),
+                                original_text=parsed_messages,
                             )
                         )
                         memory_tasks.append((task, resp, "ADD", None))
@@ -1321,7 +1369,7 @@ class AsyncMemory(MemoryBase):
             "role",
         ]
 
-        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", *promoted_payload_keys}
+        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", "original_text", *promoted_payload_keys}
 
         result_item = MemoryItem(
             id=memory.id,
@@ -1330,6 +1378,28 @@ class AsyncMemory(MemoryBase):
             created_at=memory.payload.get("created_at"),
             updated_at=memory.payload.get("updated_at"),
         ).model_dump()
+
+        # Add text field with memory data (not original_text), decode unicode escapes
+        text_content = memory.payload["data"]
+        try:
+            # Try to decode unicode escapes if present for text field
+            if isinstance(text_content, str) and '\\u' in text_content:
+                import codecs
+                result_item["text"] = codecs.decode(text_content, 'unicode_escape')
+            else:
+                result_item["text"] = text_content
+        except (UnicodeDecodeError, AttributeError):
+            # If decoding fails, use original content
+            result_item["text"] = text_content
+        
+        # Keep memory field in original escaped format
+        memory_data = memory.payload["data"]
+        if isinstance(memory_data, str) and not '\\u' in memory_data:
+            # If memory_data is already decoded, encode it back to unicode escapes
+            result_item["memory"] = memory_data.encode('unicode_escape').decode('ascii')
+        else:
+            # Keep original format
+            result_item["memory"] = memory_data
 
         for key in promoted_payload_keys:
             if key in memory.payload:
@@ -1427,7 +1497,7 @@ class AsyncMemory(MemoryBase):
             "actor_id",
             "role",
         ]
-        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", *promoted_payload_keys}
+        core_and_promoted_keys = {"data", "hash", "created_at", "updated_at", "id", "original_text", *promoted_payload_keys}
 
         formatted_memories = []
         for mem in actual_memories:
@@ -1438,6 +1508,28 @@ class AsyncMemory(MemoryBase):
                 created_at=mem.payload.get("created_at"),
                 updated_at=mem.payload.get("updated_at"),
             ).model_dump(exclude={"score"})
+
+            # Add text field with memory data (not original_text), decode unicode escapes
+            text_content = mem.payload["data"]
+            try:
+                # Try to decode unicode escapes if present for text field
+                if isinstance(text_content, str) and '\\u' in text_content:
+                    import codecs
+                    memory_item_dict["text"] = codecs.decode(text_content, 'unicode_escape')
+                else:
+                    memory_item_dict["text"] = text_content
+            except (UnicodeDecodeError, AttributeError):
+                # If decoding fails, use original content
+                memory_item_dict["text"] = text_content
+            
+            # Keep memory field in original escaped format
+            memory_data = mem.payload["data"]
+            if isinstance(memory_data, str) and not '\\u' in memory_data:
+                # If memory_data is already decoded, encode it back to unicode escapes
+                memory_item_dict["memory"] = memory_data.encode('unicode_escape').decode('ascii')
+            else:
+                # Keep original format
+                memory_item_dict["memory"] = memory_data
 
             for key in promoted_payload_keys:
                 if key in mem.payload:
@@ -1652,7 +1744,7 @@ class AsyncMemory(MemoryBase):
         capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "async"})
         return await asyncio.to_thread(self.db.get_history, memory_id)
 
-    async def _create_memory(self, data, existing_embeddings, metadata=None):
+    async def _create_memory(self, data, existing_embeddings, metadata=None, original_text=None):
         logging.debug(f"Creating memory with {data=}")
         if data in existing_embeddings:
             embeddings = existing_embeddings[data]
@@ -1662,8 +1754,10 @@ class AsyncMemory(MemoryBase):
         memory_id = str(uuid.uuid4())
         metadata = metadata or {}
         metadata["data"] = data
+        if original_text:
+            metadata["original_text"] = original_text
         metadata["hash"] = hashlib.md5(data.encode()).hexdigest()
-        metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).isoformat()
+        metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).strftime('%Y-%m-%d %H:%M:%S')
 
         await asyncio.to_thread(
             self.vector_store.insert,

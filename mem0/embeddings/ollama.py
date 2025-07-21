@@ -31,9 +31,27 @@ class OllamaEmbedding(EmbeddingBase):
         """
         Ensure the specified model exists locally. If not, pull it from Ollama.
         """
-        local_models = self.client.list()["models"]
-        if not any(model.get("name") == self.config.model for model in local_models):
-            self.client.pull(self.config.model)
+        try:
+            local_models = self.client.list()["models"]
+            # Check if model exists with exact name or with :latest suffix
+            model_exists = any(
+                model.get("name") == self.config.model or 
+                model.get("name") == self.config.model.replace(":latest", "") or
+                model.get("name") + ":latest" == self.config.model
+                for model in local_models
+            )
+            
+            if not model_exists:
+                try:
+                    self.client.pull(self.config.model)
+                except Exception as pull_error:
+                    # If pull fails, try to use the model anyway - it might exist but list failed
+                    print(f"Warning: Failed to pull model {self.config.model}: {pull_error}")
+                    print("Attempting to use model anyway...")
+        except Exception as list_error:
+            # If listing models fails, skip model check and try to use the model directly
+            print(f"Warning: Failed to list models: {list_error}")
+            print("Skipping model existence check...")
 
     def embed(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None):
         """
