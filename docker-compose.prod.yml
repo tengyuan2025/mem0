@@ -1,0 +1,195 @@
+version: '3.8'
+
+services:
+  # Mem0 API 服务 - 生产配置
+  mem0-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mem0-api-prod
+    ports:
+      - "8000:8000"
+    environment:
+      # 必需的环境变量
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # 生产环境配置
+      - ENV=production
+      - DEBUG=false
+      - LOG_LEVEL=info
+      # Mem0 配置
+      - MEM0_API_KEY=${MEM0_API_KEY:-}
+      - MEM0_LLM_MODEL=${MEM0_LLM_MODEL:-gpt-4o-mini}
+      - MEM0_VECTOR_STORE_PROVIDER=qdrant
+      - MEM0_VECTOR_STORE_HOST=qdrant
+      - MEM0_VECTOR_STORE_PORT=6333
+      - MEM0_EMBEDDER_MODEL=${MEM0_EMBEDDER_MODEL:-text-embedding-3-small}
+      # 数据库配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mem0-network
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # Qdrant 向量数据库 - 生产配置
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: mem0-qdrant-prod
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ./qdrant-config.yaml:/qdrant/config/production.yaml
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - mem0-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # Redis 缓存 - 生产配置
+  redis:
+    image: redis:7.2-alpine
+    container_name: mem0-redis-prod
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mem0-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 512M
+
+  # Nginx 反向代理和负载均衡
+  nginx:
+    image: nginx:alpine
+    container_name: mem0-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - mem0-api
+    restart: always
+    networks:
+      - mem0-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # 监控服务 - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mem0-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    restart: always
+    networks:
+      - mem0-network
+    profiles:
+      - monitoring
+
+  # 监控面板 - Grafana  
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mem0-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+    restart: always
+    networks:
+      - mem0-network
+    profiles:
+      - monitoring
+
+# 网络配置
+networks:
+  mem0-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 数据卷
+volumes:
+  qdrant_data:
+    driver: local
+  redis_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  prometheus_data:
+    driver: local  
+  grafana_data:
+    driver: local
