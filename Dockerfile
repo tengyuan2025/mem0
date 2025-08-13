@@ -66,8 +66,14 @@ RUN pip install --no-cache-dir \
 
 # 安装其他有用的依赖
 RUN pip install --no-cache-dir \
-    boto3>=1.34.0 \
-    sentence-transformers>=5.0.0
+    boto3>=1.34.0
+
+# 安装中文本地嵌入依赖
+RUN pip install --no-cache-dir \
+    sentence-transformers>=3.0.0 \
+    transformers>=4.30.0 \
+    torch>=1.11.0 \
+    huggingface-hub>=0.20.0
 
 # 设置权限
 RUN chmod +x *.py

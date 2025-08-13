@@ -1,6 +1,18 @@
 fastapi==0.115.8
 uvicorn==0.34.0
 pydantic==2.10.4
-mem0ai>=0.1.48
 python-dotenv==1.0.1
 psycopg2-binary==2.9.10
+
+# Mem0本地部署核心依赖 (使用本地源代码，不安装mem0ai包)
+qdrant-client>=1.9.1
+openai>=1.33.0
+sqlalchemy>=2.0.31
+pytz>=2024.1
+python-multipart>=0.0.6
+
+# 中文本地嵌入支持
+sentence-transformers>=3.0.0
+transformers>=4.30.0
+torch>=1.11.0
+huggingface-hub>=0.20.0

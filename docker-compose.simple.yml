@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # Qdrant 向量数据库
+  qdrant:
+    image: qdrant/qdrant:v1.8.1
+    container_name: mem0-qdrant-simple
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data_simple:/qdrant/storage
+    environment:
+      - QDRANT_LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis缓存 (可选)
+  redis:
+    image: redis:7-alpine
+    container_name: mem0-redis-simple
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_simple:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  qdrant_data_simple:
+  redis_data_simple:
+
+networks:
+  default:
+    name: mem0-simple-network

@@ -68,49 +68,99 @@ def create_local_memory_config() -> MemoryConfig:
     from mem0.embeddings.configs import EmbedderConfig
     from mem0.vector_stores.configs import VectorStoreConfig
     
-    # OpenAI API 密钥检查
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
-    
     # 获取配置参数
-    llm_model = os.getenv("MEM0_LLM_MODEL", "gpt-4o-mini")
-    embedder_model = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
+    llm_provider = os.getenv("MEM0_LLM_PROVIDER", "doubao")
+    llm_model = os.getenv("MEM0_LLM_MODEL", "doubao-pro-32k")
+    embedder_provider = os.getenv("MEM0_EMBEDDER_PROVIDER", "huggingface")
+    embedder_model = os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-large-zh-v1.5")
     vector_store_provider = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant")
     qdrant_host = os.getenv("QDRANT_HOST", "qdrant")
     qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
     
-    logger.info("Configuring local memory with Chinese optimization...")
+    logger.info(f"Configuring local memory with Chinese optimization...")
+    logger.info(f"LLM: {llm_provider}/{llm_model}")
+    logger.info(f"Embedder: {embedder_provider}/{embedder_model}")
     
-    return MemoryConfig(
-        # LLM 配置 - 使用 OpenAI GPT 模型
-        llm=LlmConfig(
-            provider="openai",
-            config={
+    # LLM配置
+    llm_config = {}
+    if llm_provider == "doubao":
+        doubao_api_key = os.getenv("DOUBAO_API_KEY") or os.getenv("ARK_API_KEY")
+        if not doubao_api_key:
+            logger.warning("DOUBAO_API_KEY not found, falling back to OpenAI")
+            llm_provider = "openai"
+            llm_model = os.getenv("MEM0_LLM_MODEL", "gpt-4o-mini")
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+            if not openai_api_key:
+                raise ValueError("Either DOUBAO_API_KEY or OPENAI_API_KEY is required")
+            llm_config = {
                 "model": llm_model,
                 "temperature": 0.1,
                 "max_tokens": 2000,
                 "api_key": openai_api_key
             }
-        ),
-        
-        # 嵌入模型配置 - 优化中文支持
-        embedder=EmbedderConfig(
-            provider="openai", 
-            config={
-                "model": embedder_model,  # text-embedding-3-small 对中文支持很好
-                "api_key": openai_api_key
+        else:
+            llm_config = {
+                "model": llm_model,
+                "temperature": 0.1,
+                "max_tokens": 2000,
+                "api_key": doubao_api_key,
+                "doubao_base_url": os.getenv("DOUBAO_API_BASE", "https://ark.cn-beijing.volces.com/api/v3")
             }
+    else:
+        # 默认使用OpenAI
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required when not using Doubao")
+        llm_config = {
+            "model": llm_model,
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "api_key": openai_api_key
+        }
+    
+    # 嵌入模型配置
+    embedder_config = {}
+    embedding_dims = 1024  # BGE-Large-ZH 默认维度
+    
+    if embedder_provider == "huggingface":
+        embedder_config = {
+            "model": embedder_model,
+            "embedding_dims": embedding_dims
+        }
+    else:
+        # 默认使用OpenAI
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required for OpenAI embeddings")
+        embedder_provider = "openai"
+        embedder_model = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
+        embedding_dims = 1536  # OpenAI text-embedding-3-small 维度
+        embedder_config = {
+            "model": embedder_model,
+            "api_key": openai_api_key
+        }
+    
+    return MemoryConfig(
+        # LLM 配置
+        llm=LlmConfig(
+            provider=llm_provider,
+            config=llm_config
         ),
         
-        # 向量数据库配置 - 使用本地 Qdrant
+        # 嵌入模型配置
+        embedder=EmbedderConfig(
+            provider=embedder_provider,
+            config=embedder_config
+        ),
+        
+        # 向量数据库配置
         vector_store=VectorStoreConfig(
             provider=vector_store_provider,
             config={
                 "host": qdrant_host,
                 "port": qdrant_port,
                 "collection_name": "mem0_memories",
-                "embedding_model_dims": 1536,  # text-embedding-3-small 的维度
+                "embedding_model_dims": embedding_dims,
                 "distance": "cosine"
             }
         ),

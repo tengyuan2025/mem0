@@ -1,0 +1,64 @@
+# 开发环境 Docker 镜像 - 中国网络优化版本
+FROM python:3.11-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV HF_HOME=/root/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/root/.cache/torch/transformers
+
+# 使用阿里云Debian镜像源加速下载
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    wget \
+    git \
+    vim \
+    htop \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# 使用清华大学PyPI镜像源加速Python包下载
+RUN python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple/
+
+# 复制依赖文件
+COPY requirements-chinese.txt /app/
+COPY pyproject.toml /app/
+
+# 安装开发所需的所有依赖 - 使用国内镜像
+RUN pip install --no-cache-dir -r requirements-chinese.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
+
+# 安装开发工具 - 使用国内镜像
+RUN pip install --no-cache-dir \
+    pytest>=8.2.2 \
+    pytest-asyncio>=0.23.7 \
+    pytest-mock>=3.14.0 \
+    pytest-cov>=4.1.0 \
+    black \
+    isort \
+    flake8 \
+    ipython \
+    ipdb \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple/
+
+# 创建必要目录
+RUN mkdir -p /app/data /app/logs /root/.cache/huggingface /root/.cache/torch/transformers
+
+# 设置权限
+RUN chmod -R 755 /app
+
+# 暴露端口
+EXPOSE 8000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# 开发环境启动命令 - 支持热重载
+CMD ["python", "-m", "uvicorn", "mem0.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

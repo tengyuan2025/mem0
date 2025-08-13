@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class LlmConfig(BaseModel):
-    provider: str = Field(description="Provider of the LLM (e.g., 'ollama', 'openai')", default="openai")
+    provider: str = Field(description="Provider of the LLM (e.g., 'doubao', 'openai')", default="doubao")
     config: Optional[dict] = Field(description="Configuration for the specific LLM", default={})
 
     @field_validator("config")
@@ -23,6 +23,7 @@ class LlmConfig(BaseModel):
             "azure_openai_structured",
             "gemini",
             "deepseek",
+            "doubao",
             "xai",
             "sarvam",
             "lmstudio",
