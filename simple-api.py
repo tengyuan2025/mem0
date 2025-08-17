@@ -296,6 +296,34 @@ async def search_memories_get(user_id: str, query: str, limit: int = 10, agent_i
     
     return await search_memories(search_request)
 
+@app.get("/v1/memories/all")
+async def get_all_memories():
+    """获取所有记忆 - 跨用户查询"""
+    all_memories = []
+    
+    # 遍历所有用户的记忆
+    for user_id, memories in memory_storage.items():
+        for memory in memories:
+            all_memories.append({
+                "id": memory["id"],
+                "content": memory["content"],
+                "created_at": memory["created_at"],
+                "user_id": memory["user_id"],
+                "agent_id": memory.get("agent_id"),
+                "run_id": memory.get("run_id"),
+                "message_count": memory.get("message_count", 0)
+            })
+    
+    # 按创建时间倒序排序，最新的在前
+    all_memories.sort(key=lambda x: x["created_at"], reverse=True)
+    
+    return {
+        "memories": all_memories,
+        "total_count": len(all_memories),
+        "users_count": len(memory_storage),
+        "status": "success"
+    }
+
 @app.get("/v1/system/stats")
 async def get_system_stats():
     """获取系统统计信息"""
@@ -434,7 +462,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "simple-api:app",
         host="0.0.0.0",
-        port=8000,
+        port=8004,
         reload=False,
         log_level="info"
     )
