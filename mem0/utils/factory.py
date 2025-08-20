@@ -6,7 +6,6 @@ from mem0.configs.llms.anthropic import AnthropicConfig
 from mem0.configs.llms.azure import AzureOpenAIConfig
 from mem0.configs.llms.base import BaseLlmConfig
 from mem0.configs.llms.deepseek import DeepSeekConfig
-from mem0.configs.llms.doubao import DoubaoConfig
 from mem0.configs.llms.lmstudio import LMStudioConfig
 from mem0.configs.llms.ollama import OllamaConfig
 from mem0.configs.llms.openai import OpenAIConfig
@@ -40,7 +39,6 @@ class LlmFactory:
         "azure_openai_structured": ("mem0.llms.azure_openai_structured.AzureOpenAIStructuredLLM", AzureOpenAIConfig),
         "gemini": ("mem0.llms.gemini.GeminiLLM", BaseLlmConfig),
         "deepseek": ("mem0.llms.deepseek.DeepSeekLLM", DeepSeekConfig),
-        "doubao": ("mem0.llms.doubao.DoubaoLLM", DoubaoConfig),
         "xai": ("mem0.llms.xai.XAILLM", BaseLlmConfig),
         "sarvam": ("mem0.llms.sarvam.SarvamLLM", BaseLlmConfig),
         "lmstudio": ("mem0.llms.lmstudio.LMStudioLLM", LMStudioConfig),
@@ -167,6 +165,7 @@ class VectorStoreFactory:
         "pinecone": "mem0.vector_stores.pinecone.PineconeDB",
         "mongodb": "mem0.vector_stores.mongodb.MongoDB",
         "redis": "mem0.vector_stores.redis.RedisDB",
+        "databricks": "mem0.vector_stores.databricks.Databricks",
         "elasticsearch": "mem0.vector_stores.elasticsearch.ElasticsearchDB",
         "vertex_ai_vector_search": "mem0.vector_stores.vertex_ai_vector_search.GoogleMatchingEngine",
         "opensearch": "mem0.vector_stores.opensearch.OpenSearchDB",
@@ -198,10 +197,11 @@ class GraphStoreFactory:
     Factory for creating MemoryGraph instances for different graph store providers.
     Usage: GraphStoreFactory.create(provider_name, config)
     """
-    
+
     provider_to_class = {
         "memgraph": "mem0.memory.memgraph_memory.MemoryGraph",
         "neptune": "mem0.graphs.neptune.main.MemoryGraph",
+        "kuzu": "mem0.memory.kuzu_memory.MemoryGraph",
         "default": "mem0.memory.graph_memory.MemoryGraph",
     }
 

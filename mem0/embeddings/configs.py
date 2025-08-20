@@ -5,13 +5,10 @@ from pydantic import BaseModel, Field, field_validator
 
 class EmbedderConfig(BaseModel):
     provider: str = Field(
-        description="Provider of the embedding model (e.g., 'huggingface', 'ollama') - optimized for local Chinese embedding",
-        default="huggingface",
+        description="Provider of the embedding model (e.g., 'ollama', 'openai')",
+        default="openai",
     )
-    config: Optional[dict] = Field(
-        description="Configuration for the specific embedding model - optimized for Chinese", 
-        default={"model": "BAAI/bge-large-zh-v1.5"}
-    )
+    config: Optional[dict] = Field(description="Configuration for the specific embedding model", default={})
 
     @field_validator("config")
     def validate_config(cls, v, values):
