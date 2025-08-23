@@ -1,0 +1,16 @@
+# Core dependencies
+mem0ai[vector_stores]
+sentence-transformers
+qdrant-client
+requests
+
+# Web service dependencies
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+
+# Optional dependencies for different configurations
+faiss-cpu  # or faiss-gpu if you have CUDA
+openai  # if using OpenAI embeddings
+ollama  # if using Ollama models

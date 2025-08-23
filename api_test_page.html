@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek + Qdrant API 测试工具</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { margin-bottom: 10px; font-size: 2.2em; }
+        .header p { opacity: 0.9; font-size: 1.1em; }
+        .nav {
+            background: #f8f9fa;
+            padding: 0;
+            display: flex;
+            overflow-x: auto;
+        }
+        .nav-item {
+            padding: 15px 25px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        .nav-item:hover { background: #e9ecef; }
+        .nav-item.active {
+            background: #007bff;
+            color: white;
+            border-bottom-color: #0056b3;
+        }
+        .content { padding: 30px; }
+        .api-section {
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+        .api-section.active { display: block; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        .form-control {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.25);
+        }
+        textarea.form-control {
+            resize: vertical;
+            min-height: 80px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,123,255,0.4);
+        }
+        .btn:active { transform: translateY(0); }
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+        .btn-danger:hover {
+            box-shadow: 0 5px 15px rgba(220,53,69,0.4);
+        }
+        .result {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .result.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .col { flex: 1; }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .status-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        .status-card h4 {
+            margin-bottom: 15px;
+            color: #495057;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .status-value.online { color: #28a745; font-weight: bold; }
+        .status-value.offline { color: #dc3545; font-weight: bold; }
+        .memory-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .memory-meta {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 8px;
+        }
+        .memory-actions {
+            margin-top: 10px;
+        }
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        .loading {
+            display: inline-block;
+            margin-left: 10px;
+        }
+        .spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .quick-examples {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .quick-examples h4 {
+            margin-bottom: 10px;
+            color: #1976d2;
+        }
+        .example-btn {
+            background: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #bbdefb;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 4px;
+            font-size: 12px;
+        }
+        .example-btn:hover {
+            background: #bbdefb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 DeepSeek + Qdrant API 测试工具</h1>
+            <p>交互式 API 接口测试平台 - 服务端口: 9000</p>
+        </div>
+        
+        <div class="nav">
+            <div class="nav-item active" onclick="showSection('add')">💾 添加记忆</div>
+            <div class="nav-item" onclick="showSection('search')">🔍 搜索记忆</div>
+            <div class="nav-item" onclick="showSection('list')">📚 所有记忆</div>
+            <div class="nav-item" onclick="showSection('delete')">🗑️ 删除记忆</div>
+            <div class="nav-item" onclick="showSection('status')">📊 系统状态</div>
+            <div class="nav-item" onclick="showSection('batch')">⚡ 批量操作</div>
+        </div>
+        
+        <div class="content">
+            <!-- 添加记忆 -->
+            <div class="api-section active" id="add">
+                <h3>💾 添加记忆</h3>
+                <p style="margin-bottom: 20px; color: #6c757d;">向系统中添加新的记忆内容</p>
+                
+                <div class="quick-examples">
+                    <h4>快速示例</h4>
+                    <button class="example-btn" onclick="fillAddExample('work')">工作信息</button>
+                    <button class="example-btn" onclick="fillAddExample('hobby')">兴趣爱好</button>
+                    <button class="example-btn" onclick="fillAddExample('skill')">技能经验</button>
+                    <button class="example-btn" onclick="fillAddExample('learning')">学习笔记</button>
+                </div>
+                
+                <div class="form-group">
+                    <label>记忆内容 *</label>
+                    <textarea id="addText" class="form-control" rows="4" placeholder="输入要记住的内容..."></textarea>
+                </div>
+                
+                <div class="row">
+                    <div class="col">
+                        <div class="form-group">
+                            <label>用户ID</label>
+                            <input type="text" id="addUserId" class="form-control" value="demo_user" placeholder="用户标识">
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="form-group">
+                            <label>元数据 (JSON格式，可选)</label>
+                            <textarea id="addMetadata" class="form-control" placeholder='{"type": "分类", "source": "来源"}'></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="btn" onclick="addMemory()">
+                    💾 添加记忆
+                    <div class="loading" id="addLoading" style="display: none;"><div class="spinner"></div></div>
+                </button>
+                
+                <div id="addResult" class="result" style="display: none;"></div>
+            </div>
+            
+            <!-- 搜索记忆 -->
+            <div class="api-section" id="search">
+                <h3>🔍 搜索记忆</h3>
+                <p style="margin-bottom: 20px; color: #6c757d;">根据关键词搜索相关的记忆内容</p>
+                
+                <div class="quick-examples">
+                    <h4>搜索示例</h4>
+                    <button class="example-btn" onclick="fillSearchExample('python')">Python 开发</button>
+                    <button class="example-btn" onclick="fillSearchExample('ai')">人工智能</button>
+                    <button class="example-btn" onclick="fillSearchExample('work')">工作相关</button>
+                    <button class="example-btn" onclick="fillSearchExample('study')">学习笔记</button>
+                </div>
+                
+                <div class="row">
+                    <div class="col">
+                        <div class="form-group">
+                            <label>搜索关键词 *</label>
+                            <input type="text" id="searchQuery" class="form-control" placeholder="输入搜索关键词...">
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="form-group">
+                            <label>用户ID</label>
+                            <input type="text" id="searchUserId" class="form-control" value="demo_user" placeholder="用户标识">
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="form-group">
+                            <label>结果数量</label>
+                            <input type="number" id="searchLimit" class="form-control" value="5" min="1" max="20">
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="btn" onclick="searchMemories()">
+                    🔍 搜索记忆
+                    <div class="loading" id="searchLoading" style="display: none;"><div class="spinner"></div></div>
+                </button>
+                
+                <div id="searchResult" class="result" style="display: none;"></div>
+                <div id="searchMemories" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- 所有记忆 -->
+            <div class="api-section" id="list">
+                <h3>📚 所有记忆</h3>
+                <p style="margin-bottom: 20px; color: #6c757d;">获取指定用户的所有记忆内容</p>
+                
+                <div class="row">
+                    <div class="col">
+                        <div class="form-group">
+                            <label>用户ID *</label>
+                            <input type="text" id="listUserId" class="form-control" value="demo_user" placeholder="用户标识">
+                        </div>
+                    </div>
+                    <div class="col" style="display: flex; align-items: end;">
+                        <button class="btn" onclick="listMemories()">
+                            📚 获取所有记忆
+                            <div class="loading" id="listLoading" style="display: none;"><div class="spinner"></div></div>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="listResult" class="result" style="display: none;"></div>
+                <div id="listMemories" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- 删除记忆 -->
+            <div class="api-section" id="delete">
+                <h3>🗑️ 删除记忆</h3>
+                <p style="margin-bottom: 20px; color: #6c757d;">删除指定的记忆内容</p>
+                
+                <div class="form-group">
+                    <label>记忆ID *</label>
+                    <input type="text" id="deleteMemoryId" class="form-control" placeholder="输入要删除的记忆ID...">
+                </div>
+                
+                <button class="btn btn-danger" onclick="deleteMemory()">
+                    🗑️ 删除记忆
+                    <div class="loading" id="deleteLoading" style="display: none;"><div class="spinner"></div></div>
+                </button>
+                
+                <div id="deleteResult" class="result" style="display: none;"></div>
+            </div>
+            
+            <!-- 系统状态 -->
+            <div class="api-section" id="status">
+                <h3>📊 系统状态</h3>
+                <p style="margin-bottom: 20px; color: #6c757d;">查看系统各组件的运行状态</p>
+                
+                <button class="btn" onclick="getStatus()">
+                    📊 检查系统状态
+                    <div class="loading" id="statusLoading" style="display: none;"><div class="spinner"></div></div>
+                </button>
+                
+                <div id="statusResult" class="result" style="display: none;"></div>
+                <div id="statusCards" style="margin-top: 20px;"></div>
+            </div>
+            
+            <!-- 批量操作 -->
+            <div class="api-section" id="batch">
+                <h3>⚡ 批量操作</h3>
+                <p style="margin-bottom: 20px; color: #6c757d;">批量添加示例数据和批量测试功能</p>
+                
+                <div class="row">
+                    <div class="col">
+                        <h4>批量添加示例数据</h4>
+                        <p style="color: #6c757d; margin-bottom: 15px;">添加一组预设的中文示例记忆</p>
+                        <button class="btn" onclick="batchAddSamples()">
+                            💾 批量添加示例
+                            <div class="loading" id="batchAddLoading" style="display: none;"><div class="spinner"></div></div>
+                        </button>
+                    </div>
+                    <div class="col">
+                        <h4>全功能测试</h4>
+                        <p style="color: #6c757d; margin-bottom: 15px;">测试所有 API 接口功能</p>
+                        <button class="btn" onclick="runFullTest()">
+                            🧪 运行完整测试
+                            <div class="loading" id="fullTestLoading" style="display: none;"><div class="spinner"></div></div>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="batchResult" class="result" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = 'http://localhost:9000/api';
+        
+        // 显示指定section
+        function showSection(sectionId) {
+            // 隐藏所有section
+            document.querySelectorAll('.api-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            // 移除所有nav-item的active类
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // 显示指定section
+            document.getElementById(sectionId).classList.add('active');
+            
+            // 设置对应nav-item为active
+            event.target.classList.add('active');
+        }
+        
+        // 显示结果
+        function showResult(elementId, data, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.className = `result ${type}`;
+            element.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+            element.style.display = 'block';
+        }
+        
+        // 显示加载状态
+        function showLoading(loadingId, show = true) {
+            document.getElementById(loadingId).style.display = show ? 'inline-block' : 'none';
+        }
+        
+        // 填充添加记忆示例
+        function fillAddExample(type) {
+            const examples = {
+                'work': {
+                    text: '我在一家AI科技公司担任机器学习工程师，主要负责自然语言处理和计算机视觉项目的开发',
+                    metadata: '{"type": "工作", "category": "职业信息", "field": "人工智能"}'
+                },
+                'hobby': {
+                    text: '我喜欢在周末阅读科技类书籍和技术博客，特别关注最新的AI技术发展和开源项目',
+                    metadata: '{"type": "爱好", "category": "个人兴趣", "frequency": "周末"}'
+                },
+                'skill': {
+                    text: '我精通Python、TensorFlow和PyTorch，有5年的深度学习项目经验，擅长构建端到端的AI应用',
+                    metadata: '{"type": "技能", "category": "专业能力", "level": "高级"}'
+                },
+                'learning': {
+                    text: '今天学习了Transformer架构的注意力机制，理解了self-attention如何处理序列数据中的长程依赖关系',
+                    metadata: '{"type": "学习", "category": "技术笔记", "topic": "深度学习"}'
+                }
+            };
+            
+            const example = examples[type];
+            document.getElementById('addText').value = example.text;
+            document.getElementById('addMetadata').value = example.metadata;
+        }
+        
+        // 填充搜索示例
+        function fillSearchExample(type) {
+            const examples = {
+                'python': 'Python开发',
+                'ai': '人工智能',
+                'work': '工作经验',
+                'study': '学习笔记'
+            };
+            
+            document.getElementById('searchQuery').value = examples[type];
+        }
+        
+        // 添加记忆
+        async function addMemory() {
+            const text = document.getElementById('addText').value.trim();
+            const userId = document.getElementById('addUserId').value.trim();
+            const metadataText = document.getElementById('addMetadata').value.trim();
+            
+            if (!text) {
+                showResult('addResult', '请输入记忆内容', 'error');
+                return;
+            }
+            
+            let metadata = {};
+            if (metadataText) {
+                try {
+                    metadata = JSON.parse(metadataText);
+                } catch (e) {
+                    showResult('addResult', '元数据格式错误，请使用正确的JSON格式', 'error');
+                    return;
+                }
+            }
+            
+            showLoading('addLoading', true);
+            
+            try {
+                const response = await fetch(`${API_BASE}/memories`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        user_id: userId || 'default_user',
+                        metadata: metadata
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('addResult', `✅ 记忆添加成功！\n\n${JSON.stringify(data, null, 2)}`, 'success');
+                    // 清空输入框
+                    document.getElementById('addText').value = '';
+                    document.getElementById('addMetadata').value = '';
+                } else {
+                    showResult('addResult', `❌ 添加失败: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult('addResult', `❌ 网络错误: ${error.message}`, 'error');
+            } finally {
+                showLoading('addLoading', false);
+            }
+        }
+        
+        // 搜索记忆
+        async function searchMemories() {
+            const query = document.getElementById('searchQuery').value.trim();
+            const userId = document.getElementById('searchUserId').value.trim();
+            const limit = parseInt(document.getElementById('searchLimit').value);
+            
+            if (!query) {
+                showResult('searchResult', '请输入搜索关键词', 'error');
+                return;
+            }
+            
+            showLoading('searchLoading', true);
+            
+            try {
+                const response = await fetch(`${API_BASE}/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        user_id: userId || 'default_user',
+                        limit: limit || 5
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('searchResult', `✅ 搜索完成！找到 ${data.memories.length} 条相关记忆`, 'success');
+                    displayMemories('searchMemories', data.memories, true);
+                } else {
+                    showResult('searchResult', `❌ 搜索失败: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult('searchResult', `❌ 网络错误: ${error.message}`, 'error');
+            } finally {
+                showLoading('searchLoading', false);
+            }
+        }
+        
+        // 获取所有记忆
+        async function listMemories() {
+            const userId = document.getElementById('listUserId').value.trim();
+            
+            if (!userId) {
+                showResult('listResult', '请输入用户ID', 'error');
+                return;
+            }
+            
+            showLoading('listLoading', true);
+            
+            try {
+                const response = await fetch(`${API_BASE}/memories/${userId}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('listResult', `✅ 获取成功！共有 ${data.memories.length} 条记忆`, 'success');
+                    displayMemories('listMemories', data.memories, false);
+                } else {
+                    showResult('listResult', `❌ 获取失败: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult('listResult', `❌ 网络错误: ${error.message}`, 'error');
+            } finally {
+                showLoading('listLoading', false);
+            }
+        }
+        
+        // 删除记忆
+        async function deleteMemory() {
+            const memoryId = document.getElementById('deleteMemoryId').value.trim();
+            
+            if (!memoryId) {
+                showResult('deleteResult', '请输入记忆ID', 'error');
+                return;
+            }
+            
+            if (!confirm('确定要删除这条记忆吗？')) {
+                return;
+            }
+            
+            showLoading('deleteLoading', true);
+            
+            try {
+                const response = await fetch(`${API_BASE}/memories/${memoryId}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('deleteResult', `✅ 删除成功！\n\n${JSON.stringify(data, null, 2)}`, 'success');
+                    document.getElementById('deleteMemoryId').value = '';
+                } else {
+                    showResult('deleteResult', `❌ 删除失败: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult('deleteResult', `❌ 网络错误: ${error.message}`, 'error');
+            } finally {
+                showLoading('deleteLoading', false);
+            }
+        }
+        
+        // 获取系统状态
+        async function getStatus() {
+            showLoading('statusLoading', true);
+            
+            try {
+                const response = await fetch(`${API_BASE}/status`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('statusResult', '✅ 系统状态获取成功', 'success');
+                    displayStatusCards(data);
+                } else {
+                    showResult('statusResult', `❌ 获取状态失败: ${response.statusText}`, 'error');
+                }
+            } catch (error) {
+                showResult('statusResult', `❌ 网络错误: ${error.message}`, 'error');
+            } finally {
+                showLoading('statusLoading', false);
+            }
+        }
+        
+        // 显示记忆列表
+        function displayMemories(containerId, memories, showScore = false) {
+            const container = document.getElementById(containerId);
+            
+            if (memories.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #6c757d; padding: 20px;">暂无记忆数据</p>';
+                return;
+            }
+            
+            let html = '';
+            memories.forEach((memory, index) => {
+                html += `
+                    <div class="memory-item">
+                        <div><strong>${index + 1}.</strong> ${memory.memory}</div>
+                        <div class="memory-meta">
+                            <span>ID: ${memory.id.substring(0, 12)}...</span>
+                            ${showScore && memory.score ? `<span style="margin-left: 15px;">相关度: ${memory.score.toFixed(4)}</span>` : ''}
+                            ${memory.metadata ? `<span style="margin-left: 15px;">标签: ${JSON.stringify(memory.metadata)}</span>` : ''}
+                        </div>
+                        <div class="memory-actions">
+                            <button class="btn btn-sm btn-danger" onclick="deleteMemoryById('${memory.id}')">删除</button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+        
+        // 通过ID删除记忆
+        async function deleteMemoryById(memoryId) {
+            if (!confirm('确定要删除这条记忆吗？')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/memories/${memoryId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    alert('✅ 删除成功！');
+                    // 刷新当前页面的记忆列表
+                    if (document.getElementById('search').classList.contains('active')) {
+                        searchMemories();
+                    } else if (document.getElementById('list').classList.contains('active')) {
+                        listMemories();
+                    }
+                } else {
+                    const data = await response.json();
+                    alert(`❌ 删除失败: ${data.detail}`);
+                }
+            } catch (error) {
+                alert(`❌ 网络错误: ${error.message}`);
+            }
+        }
+        
+        // 显示状态卡片
+        function displayStatusCards(status) {
+            const container = document.getElementById('statusCards');
+            
+            const html = `
+                <div class="status-grid">
+                    <div class="status-card">
+                        <h4>🗄️ 向量数据库</h4>
+                        <div class="status-item">
+                            <span>Qdrant 状态:</span>
+                            <span class="status-value ${status.qdrant_status ? 'online' : 'offline'}">
+                                ${status.qdrant_status ? '✅ 正常' : '❌ 异常'}
+                            </span>
+                        </div>
+                        <div class="status-item">
+                            <span>集合名称:</span>
+                            <span class="status-value">${status.collection_name}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <h4>🧠 记忆系统</h4>
+                        <div class="status-item">
+                            <span>系统状态:</span>
+                            <span class="status-value ${status.memory_system ? 'online' : 'offline'}">
+                                ${status.memory_system ? '✅ 正常' : '❌ 异常'}
+                            </span>
+                        </div>
+                        <div class="status-item">
+                            <span>LLM 模型:</span>
+                            <span class="status-value">${status.llm_model}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <h4>📊 嵌入模型</h4>
+                        <div class="status-item">
+                            <span>模型名称:</span>
+                            <span class="status-value">${status.embedder_model}</span>
+                        </div>
+                        <div class="status-item">
+                            <span>类型:</span>
+                            <span class="status-value">中文优化</span>
+                        </div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <h4>🌐 服务信息</h4>
+                        <div class="status-item">
+                            <span>API 端口:</span>
+                            <span class="status-value">9000</span>
+                        </div>
+                        <div class="status-item">
+                            <span>Qdrant 端口:</span>
+                            <span class="status-value">6333</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        }
+        
+        // 批量添加示例数据
+        async function batchAddSamples() {
+            const samples = [
+                {
+                    text: "我是一名AI工程师，专注于自然语言处理和机器学习应用开发",
+                    metadata: {"type": "工作", "category": "职业信息"}
+                },
+                {
+                    text: "我精通Python、TensorFlow和PyTorch，有丰富的深度学习项目经验",
+                    metadata: {"type": "技能", "category": "专业能力"}
+                },
+                {
+                    text: "我喜欢阅读最新的AI论文，特别关注Transformer架构和大语言模型的发展",
+                    metadata: {"type": "学习", "category": "兴趣爱好"}
+                },
+                {
+                    text: "我经常使用Qdrant作为向量数据库，它的性能和可扩展性都很出色",
+                    metadata: {"type": "技术", "category": "工具偏好"}
+                },
+                {
+                    text: "我住在深圳，经常参加当地的AI技术交流会和开源项目讨论",
+                    metadata: {"type": "生活", "category": "社交活动"}
+                }
+            ];
+            
+            showLoading('batchAddLoading', true);
+            let results = [];
+            
+            try {
+                for (const sample of samples) {
+                    const response = await fetch(`${API_BASE}/memories`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            text: sample.text,
+                            user_id: 'demo_user',
+                            metadata: sample.metadata
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    results.push({
+                        text: sample.text.substring(0, 50) + '...',
+                        success: response.ok,
+                        result: data
+                    });
+                }
+                
+                const successCount = results.filter(r => r.success).length;
+                showResult('batchResult', 
+                    `✅ 批量添加完成！\n成功: ${successCount}/${samples.length} 条\n\n详细结果:\n${results.map((r, i) => `${i+1}. ${r.text} - ${r.success ? '✅' : '❌'}`).join('\n')}`, 
+                    'success'
+                );
+            } catch (error) {
+                showResult('batchResult', `❌ 批量操作失败: ${error.message}`, 'error');
+            } finally {
+                showLoading('batchAddLoading', false);
+            }
+        }
+        
+        // 运行完整测试
+        async function runFullTest() {
+            showLoading('fullTestLoading', true);
+            let testResults = [];
+            
+            try {
+                // 1. 测试系统状态
+                testResults.push('🔄 测试系统状态...');
+                const statusResponse = await fetch(`${API_BASE}/status`);
+                testResults.push(`📊 状态检查: ${statusResponse.ok ? '✅ 通过' : '❌ 失败'}`);
+                
+                // 2. 测试添加记忆
+                testResults.push('🔄 测试添加记忆...');
+                const addResponse = await fetch(`${API_BASE}/memories`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: '这是一条测试记忆，用于验证API功能是否正常',
+                        user_id: 'test_user',
+                        metadata: {'type': '测试', 'timestamp': new Date().toISOString()}
+                    })
+                });
+                testResults.push(`💾 添加记忆: ${addResponse.ok ? '✅ 通过' : '❌ 失败'}`);
+                
+                // 3. 测试搜索记忆
+                testResults.push('🔄 测试搜索记忆...');
+                const searchResponse = await fetch(`${API_BASE}/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: '测试',
+                        user_id: 'test_user',
+                        limit: 5
+                    })
+                });
+                testResults.push(`🔍 搜索记忆: ${searchResponse.ok ? '✅ 通过' : '❌ 失败'}`);
+                
+                // 4. 测试获取所有记忆
+                testResults.push('🔄 测试获取所有记忆...');
+                const listResponse = await fetch(`${API_BASE}/memories/test_user`);
+                testResults.push(`📚 获取记忆: ${listResponse.ok ? '✅ 通过' : '❌ 失败'}`);
+                
+                // 5. 统计结果
+                const passCount = testResults.filter(r => r.includes('✅')).length;
+                const totalTests = testResults.filter(r => r.includes('✅') || r.includes('❌')).length;
+                
+                testResults.push('');
+                testResults.push(`📈 测试总结: ${passCount}/${totalTests} 项通过`);
+                testResults.push(`🎯 成功率: ${((passCount/totalTests)*100).toFixed(1)}%`);
+                
+                showResult('batchResult', 
+                    `🧪 完整测试结果:\n\n${testResults.join('\n')}`, 
+                    passCount === totalTests ? 'success' : 'error'
+                );
+                
+            } catch (error) {
+                showResult('batchResult', `❌ 测试执行失败: ${error.message}`, 'error');
+            } finally {
+                showLoading('fullTestLoading', false);
+            }
+        }
+        
+        // 页面加载时自动检查系统状态
+        window.addEventListener('load', function() {
+            setTimeout(getStatus, 1000);
+        });
+    </script>
+</body>
+</html>

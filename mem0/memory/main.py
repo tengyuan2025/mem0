@@ -335,12 +335,16 @@ class Memory(MemoryBase):
 
         try:
             response = remove_code_blocks(response)
+            print(f"🔍 [DEBUG] 事实提取响应: '{response}'")
             new_retrieved_facts = json.loads(response)["facts"]
+            print(f"🔍 [DEBUG] 提取的事实: {new_retrieved_facts}")
         except Exception as e:
             logger.error(f"Error in new_retrieved_facts: {e}")
+            print(f"🔍 [DEBUG] 事实提取失败: {e}")
             new_retrieved_facts = []
 
         if not new_retrieved_facts:
+            print("⚠️ [DEBUG] 没有提取到新事实，跳过记忆更新")
             logger.debug("No new facts retrieved from input. Skipping memory update LLM call.")
 
         retrieved_old_memory = []
@@ -393,10 +397,53 @@ class Memory(MemoryBase):
             new_memories_with_actions = {}
 
         returned_memories = []
+        
+        # 在这里添加修复逻辑
+        print(f"🔍 [DEBUG] 最终的 new_memories_with_actions 类型: {type(new_memories_with_actions)}")
+        print(f"🔍 [DEBUG] 最终的 new_memories_with_actions 内容: {new_memories_with_actions}")
+        
+        # 如果是列表，转换为正确的格式
+        if isinstance(new_memories_with_actions, list):
+            print(f"🔧 [FIX] 将列表转换为字典格式")
+            new_memories_with_actions = {"memory": new_memories_with_actions}
+        elif not isinstance(new_memories_with_actions, dict):
+            print(f"🔧 [FIX] 非字典类型，重置为空字典")
+            new_memories_with_actions = {}
+            
+        # 强制修复：如果没有记忆操作但有新事实，强制添加
+        if (not new_memories_with_actions.get("memory", []) and 
+            new_retrieved_facts and 
+            len(new_retrieved_facts) > 0):
+            print(f"🔧 [FIX] 强制添加提取的事实为记忆")
+            memory_actions = []
+            for fact in new_retrieved_facts:
+                memory_actions.append({
+                    "text": fact,
+                    "event": "ADD"
+                })
+            new_memories_with_actions = {"memory": memory_actions}
+            print(f"🔧 [FIX] 生成的记忆操作: {new_memories_with_actions}")
+        
         try:
-            for resp in new_memories_with_actions.get("memory", []):
+            print(f"🔍 [DEBUG] new_memories_with_actions 类型: {type(new_memories_with_actions)}")
+            print(f"🔍 [DEBUG] new_memories_with_actions 内容: {new_memories_with_actions}")
+            
+            memory_items = new_memories_with_actions.get("memory", [])
+            print(f"🔍 [DEBUG] memory_items 类型: {type(memory_items)}")
+            print(f"🔍 [DEBUG] memory_items 内容: {memory_items}")
+            
+            for resp in memory_items:
+                print(f"🔍 [DEBUG] resp 类型: {type(resp)}")
+                print(f"🔍 [DEBUG] resp 内容: {resp}")
                 logger.info(resp)
                 try:
+                    if isinstance(resp, list):
+                        print(f"⚠️ [DEBUG] resp 是列表，跳过")
+                        continue
+                    elif not isinstance(resp, dict):
+                        print(f"⚠️ [DEBUG] resp 不是字典，转换为字典")
+                        continue
+                        
                     action_text = resp.get("text")
                     if not action_text:
                         logger.info("Skipping memory entry because of empty `text` field.")
@@ -1175,12 +1222,16 @@ class AsyncMemory(MemoryBase):
         )
         try:
             response = remove_code_blocks(response)
+            print(f"🔍 [DEBUG] 事实提取响应: '{response}'")
             new_retrieved_facts = json.loads(response)["facts"]
+            print(f"🔍 [DEBUG] 提取的事实: {new_retrieved_facts}")
         except Exception as e:
             logger.error(f"Error in new_retrieved_facts: {e}")
+            print(f"🔍 [DEBUG] 事实提取失败: {e}")
             new_retrieved_facts = []
 
         if not new_retrieved_facts:
+            print("⚠️ [DEBUG] 没有提取到新事实，跳过记忆更新")
             logger.debug("No new facts retrieved from input. Skipping memory update LLM call.")
 
         retrieved_old_memory = []
