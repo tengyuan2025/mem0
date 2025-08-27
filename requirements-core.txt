@@ -1,0 +1,23 @@
+# 核心依赖（最小化安装）
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+python-dotenv==1.0.1
+loguru==0.7.3
+aiofiles==24.1.0
+httpx==0.28.1
+
+# 本地嵌入模型
+sentence-transformers
+torch
+transformers
+
+# 向量数据库
+chromadb
+
+# 可选的国内LLM服务（按需安装）
+# dashscope  # 阿里云通义千问
+# qianfan    # 百度文心一言
+# zhipuai    # 智谱AI
+# openai     # OpenAI兼容API

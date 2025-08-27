@@ -1,0 +1,174 @@
+#!/bin/bash
+
+# Mem0自托管服务启动脚本
+
+set -e
+
+echo "=========================================="
+echo "        Mem0 自托管服务启动脚本"
+echo "=========================================="
+
+# 检查是否存在.env文件
+if [ ! -f .env ]; then
+    echo "⚠️  未找到 .env 文件，正在从 .env.example 创建..."
+    cp .env.example .env
+    echo "✅ 已创建 .env 文件，请编辑配置后重新运行此脚本"
+    echo ""
+    echo "请按照以下步骤配置："
+    echo "1. 编辑 .env 文件"
+    echo "2. 设置您的 LLM API 密钥（如 DASHSCOPE_API_KEY）"
+    echo "3. 设置安全的 API_SECRET_KEY"
+    echo "4. 根据需要调整其他配置"
+    exit 1
+fi
+
+# 选择启动方式
+echo ""
+echo "请选择启动方式："
+echo "1) Docker Compose（推荐，包含所有服务）"
+echo "2) 本地Python环境（需要手动安装数据库）"
+echo "3) 仅启动API服务（Docker）"
+echo ""
+read -p "请输入选项 (1-3): " choice
+
+case $choice in
+    1)
+        echo ""
+        echo "🚀 使用 Docker Compose 启动所有服务..."
+        
+        # 检查Docker是否安装
+        if ! command -v docker &> /dev/null; then
+            echo "❌ Docker 未安装，请先安装 Docker"
+            exit 1
+        fi
+        
+        # 检查Docker服务是否运行
+        if ! docker info &> /dev/null; then
+            echo "❌ Docker 服务未运行"
+            echo "请启动 Docker Desktop 或运行: sudo systemctl start docker"
+            exit 1
+        fi
+        
+        if ! command -v docker-compose &> /dev/null; then
+            # 尝试使用docker compose命令（新版本）
+            if docker compose version &> /dev/null; then
+                echo "✅ 检测到 Docker Compose (docker compose)"
+                docker compose up -d
+            else
+                echo "❌ Docker Compose 未安装，请先安装 Docker Compose"
+                exit 1
+            fi
+        else
+            echo "✅ 检测到 Docker Compose (docker-compose)"
+            docker-compose up -d
+        fi
+        
+        echo ""
+        echo "⏳ 等待服务启动..."
+        sleep 10
+        
+        # 检查服务状态
+        if docker compose version &> /dev/null; then
+            docker compose ps
+        else
+            docker-compose ps
+        fi
+        
+        echo ""
+        echo "✅ 所有服务已启动！"
+        echo ""
+        echo "服务访问地址："
+        echo "- API服务: http://localhost:8000"
+        echo "- API文档: http://localhost:8000/docs"
+        echo "- ChromaDB: http://localhost:8001"
+        echo "- Neo4j浏览器: http://localhost:7474"
+        echo ""
+        echo "查看日志："
+        echo "- docker compose logs -f mem0-api"
+        echo ""
+        echo "停止服务："
+        echo "- docker compose down"
+        ;;
+        
+    2)
+        echo ""
+        echo "🚀 在本地Python环境中启动..."
+        
+        # 检查Python版本
+        if ! python3 --version | grep -E "3\.(9|10|11|12)" &> /dev/null; then
+            echo "❌ 需要 Python 3.9 或更高版本"
+            exit 1
+        fi
+        
+        # 创建虚拟环境
+        if [ ! -d "venv" ]; then
+            echo "📦 创建虚拟环境..."
+            python3 -m venv venv
+        fi
+        
+        # 激活虚拟环境
+        echo "🔧 激活虚拟环境..."
+        source venv/bin/activate
+        
+        # 安装依赖
+        echo "📥 安装核心依赖..."
+        pip install -r requirements-core.txt
+        
+        echo ""
+        echo "⚠️  请确保以下服务已经运行："
+        echo "- PostgreSQL (端口 5432)"
+        echo "- Redis (端口 6379)"
+        echo "- ChromaDB (端口 8001)"
+        echo ""
+        read -p "是否继续？(y/n): " confirm
+        
+        if [ "$confirm" != "y" ]; then
+            echo "已取消"
+            exit 0
+        fi
+        
+        # 启动服务
+        echo ""
+        echo "🚀 启动API服务..."
+        python app.py
+        ;;
+        
+    3)
+        echo ""
+        echo "🚀 仅启动API服务（Docker）..."
+        
+        # 构建镜像
+        echo "📦 构建Docker镜像..."
+        docker build -t mem0-api:latest .
+        
+        # 启动容器
+        echo "🚀 启动容器..."
+        docker run -d \
+            --name mem0-api \
+            --env-file .env \
+            -p 8000:8000 \
+            -v $(pwd)/logs:/app/logs \
+            -v $(pwd)/data:/app/data \
+            --restart unless-stopped \
+            mem0-api:latest
+        
+        echo ""
+        echo "✅ API服务已启动！"
+        echo ""
+        echo "服务访问地址："
+        echo "- API服务: http://localhost:8000"
+        echo "- API文档: http://localhost:8000/docs"
+        echo ""
+        echo "⚠️  注意：您需要单独配置和启动数据库服务"
+        ;;
+        
+    *)
+        echo "❌ 无效的选项"
+        exit 1
+        ;;
+esac
+
+echo ""
+echo "=========================================="
+echo "          启动完成"
+echo "=========================================="
