@@ -17,6 +17,7 @@ from loguru import logger
 from dotenv import load_dotenv
 import hashlib
 import json
+from mysql_handler import MySQLHandler
 
 # 加载环境变量
 load_dotenv()
@@ -78,6 +79,7 @@ class MemoryManager:
         self.vector_db = None
         self.llm_client = None
         self.embedding_client = None
+        self.mysql_handler = MySQLHandler()
         self.initialized = False
         
     async def initialize(self):
@@ -94,6 +96,9 @@ class MemoryManager:
             
             # 初始化Embedding客户端
             await self._init_embedding_client()
+            
+            # 初始化MySQL处理器
+            await self.mysql_handler.initialize()
             
             self.initialized = True
             logger.info("记忆管理器初始化成功")
@@ -273,6 +278,18 @@ class MemoryManager:
                     metadatas=[metadata]
                 )
             
+            # 同时存储到MySQL数据库
+            try:
+                await self.mysql_handler.insert_memory(
+                    memory_id=memory_id,
+                    user_id=user_id,
+                    content=memory_content,
+                    metadata=metadata
+                )
+                logger.info(f"记忆已同步到MySQL: {memory_id}")
+            except Exception as e:
+                logger.error(f"同步记忆到MySQL失败，但向量数据库已保存: {e}")
+            
             logger.info(f"记忆添加成功: {memory_id}")
             
             return {
@@ -353,6 +370,17 @@ class MemoryManager:
                         metadatas=[new_metadata]
                     )
             
+            # 同时更新MySQL数据库
+            try:
+                await self.mysql_handler.update_memory(
+                    memory_id=memory_id,
+                    content=content,
+                    metadata=metadata
+                )
+                logger.info(f"MySQL记忆已同步更新: {memory_id}")
+            except Exception as e:
+                logger.error(f"同步更新MySQL记忆失败，但向量数据库已更新: {e}")
+            
             logger.info(f"记忆更新成功: {memory_id}")
             
             return {"status": "success", "memory_id": memory_id}
@@ -375,6 +403,16 @@ class MemoryManager:
                     logger.info(f"用户 {user_id} 的所有记忆删除成功")
                 else:
                     raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
+            
+            # 同时从MySQL删除
+            try:
+                await self.mysql_handler.delete_memory(
+                    memory_id=memory_id,
+                    user_id=user_id
+                )
+                logger.info(f"MySQL记忆已同步删除")
+            except Exception as e:
+                logger.error(f"从MySQL删除记忆失败，但向量数据库已删除: {e}")
             
             return {"status": "success"}
             
@@ -533,6 +571,7 @@ async def lifespan(app: FastAPI):
     logger.info("Mem0服务启动成功")
     yield
     # 关闭时清理
+    await memory_manager.mysql_handler.close()
     logger.info("Mem0服务正在关闭")
 
 # 创建FastAPI应用
@@ -661,6 +700,64 @@ async def get_user_memories(
     )
     
     return {"memories": memories, "count": len(memories)}
+
+@app.get("/api/v1/mysql/users/{user_id}/memories")
+async def get_user_mysql_memories(
+    user_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    token: str = Depends(verify_token)
+):
+    """从MySQL获取用户的所有记忆"""
+    try:
+        memories = await memory_manager.mysql_handler.get_user_memories(
+            user_id=user_id,
+            limit=limit,
+            offset=offset
+        )
+        return {"memories": memories, "count": len(memories)}
+    except Exception as e:
+        logger.error(f"从MySQL获取用户记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/mysql/memories/{memory_id}")
+async def get_mysql_memory(
+    memory_id: str,
+    token: str = Depends(verify_token)
+):
+    """从MySQL获取单个记忆"""
+    try:
+        memory = await memory_manager.mysql_handler.get_memory(memory_id)
+        if not memory:
+            raise HTTPException(status_code=404, detail="记忆不存在")
+        return {"memory": memory}
+    except Exception as e:
+        logger.error(f"从MySQL获取记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/mysql/users/{user_id}/memories/search")
+async def search_mysql_memories_by_time(
+    user_id: str,
+    start_time: str,
+    end_time: str,
+    token: str = Depends(verify_token)
+):
+    """按时间范围搜索MySQL中的记忆"""
+    try:
+        start_dt = datetime.fromisoformat(start_time)
+        end_dt = datetime.fromisoformat(end_time)
+        
+        memories = await memory_manager.mysql_handler.search_memories_by_time(
+            user_id=user_id,
+            start_time=start_dt,
+            end_time=end_dt
+        )
+        return {"memories": memories, "count": len(memories)}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="时间格式错误，请使用ISO格式如：2023-01-01T00:00:00")
+    except Exception as e:
+        logger.error(f"按时间搜索MySQL记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
