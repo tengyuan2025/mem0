@@ -53,14 +53,14 @@ case $choice in
             # 尝试使用docker compose命令（新版本）
             if docker compose version &> /dev/null; then
                 echo "✅ 检测到 Docker Compose (docker compose)"
-                docker compose up -d
+                docker compose -f docker-compose-china.yml up -d
             else
                 echo "❌ Docker Compose 未安装，请先安装 Docker Compose"
                 exit 1
             fi
         else
             echo "✅ 检测到 Docker Compose (docker-compose)"
-            docker-compose up -d
+            docker-compose -f docker-compose-china.yml up -d
         fi
         
         echo ""
@@ -69,9 +69,9 @@ case $choice in
         
         # 检查服务状态
         if docker compose version &> /dev/null; then
-            docker compose ps
+            docker compose -f docker-compose-china.yml ps
         else
-            docker-compose ps
+            docker-compose -f docker-compose-china.yml ps
         fi
         
         echo ""

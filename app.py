@@ -104,22 +104,22 @@ class MemoryManager:
     
     async def _init_vector_db(self):
         """初始化向量数据库"""
-        vector_db_type = os.getenv("VECTOR_DB", "chroma")
+        vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "chroma")
         
         if vector_db_type == "chroma":
             import chromadb
             from chromadb.config import Settings
             
-            settings = Settings(
-                chroma_server_host=os.getenv("CHROMA_HOST", "localhost"),
-                chroma_server_http_port=int(os.getenv("CHROMA_PORT", 8001)),
-                anonymized_telemetry=False
-            )
-            
-            self.vector_db = chromadb.HttpClient(
-                host=os.getenv("CHROMA_HOST", "localhost"),
-                port=int(os.getenv("CHROMA_PORT", 8001))
-            )
+            # 检查是否使用持久化存储
+            if os.getenv("MEM0_VECTOR_STORE_TYPE") == "persistent":
+                persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY", "./data/chroma")
+                os.makedirs(persist_dir, exist_ok=True)
+                self.vector_db = chromadb.PersistentClient(path=persist_dir)
+            else:
+                self.vector_db = chromadb.HttpClient(
+                    host=os.getenv("CHROMA_HOST", "localhost"),
+                    port=int(os.getenv("CHROMA_PORT", 8001))
+                )
             
             # 创建或获取集合
             collection_name = os.getenv("CHROMA_COLLECTION", "mem0_memories")

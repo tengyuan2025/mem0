@@ -40,30 +40,30 @@ services:
       timeout: 5s
       retries: 5
 
-  # ChromaDB向量数据库
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: mem0-chromadb
-    environment:
-      - ALLOW_RESET=TRUE
-      - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/data
-    volumes:
-      - chroma_data:/chroma/data
-    ports:
-      - "8001:8000"
-    networks:
-      - mem0-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # ChromaDB向量数据库 - 暂时禁用，使用本地文件
+  # chromadb:
+  #   image: chromadb/chroma:latest
+  #   container_name: mem0-chromadb
+  #   environment:
+  #     - ALLOW_RESET=TRUE
+  #     - IS_PERSISTENT=TRUE
+  #     - PERSIST_DIRECTORY=/chroma/data
+  #   volumes:
+  #     - chroma_data:/chroma/data
+  #   ports:
+  #     - "8001:8000"
+  #   networks:
+  #     - mem0-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # Neo4j图数据库（可选）
   neo4j:
-    image: neo4j:5.15-community
+    image: neo4j:5-community
     container_name: mem0-neo4j
     environment:
       - NEO4J_AUTH=neo4j/password
@@ -97,8 +97,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://mem0:password@postgres:5432/mem0_db
       - REDIS_HOST=redis
-      - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8000
+      - CHROMA_HOST=localhost
+      - CHROMA_PORT=8001
       - NEO4J_URI=bolt://neo4j:7687
     ports:
       - "8000:8000"
@@ -111,8 +111,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      chromadb:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
