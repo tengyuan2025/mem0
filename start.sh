@@ -95,7 +95,7 @@ case $choice in
         echo "🚀 在本地Python环境中启动..."
         
         # 检查Python版本
-        if ! python3 --version | grep -E "3\.(9|10|11|12)" &> /dev/null; then
+        if ! python3 --version | grep -E "3\.(9|10|11|12|13)" &> /dev/null; then
             echo "❌ 需要 Python 3.9 或更高版本"
             exit 1
         fi
