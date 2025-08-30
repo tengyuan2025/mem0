@@ -3,11 +3,11 @@ Mem0 自托管服务主应用
 支持国内LLM服务和本地向量数据库
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import os
 import sys
 from datetime import datetime
@@ -24,24 +24,47 @@ load_dotenv()
 
 # 配置日志
 logger.remove()
-logger.add(sys.stdout, level=os.getenv("LOG_LEVEL", "INFO"))
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logger.add(sys.stdout, level=log_level)
 if os.getenv("LOG_FILE_PATH"):
     logger.add(
         os.getenv("LOG_FILE_PATH"),
         rotation=f"{os.getenv('LOG_MAX_SIZE', 100)} MB",
         retention=int(os.getenv("LOG_BACKUP_COUNT", 10)),
-        level=os.getenv("LOG_LEVEL", "INFO")
+        level=log_level
     )
 
 # ==========================================
 # 数据模型
 # ==========================================
 
-class MemoryAddRequest(BaseModel):
-    """添加记忆请求"""
-    user_id: str = Field(..., description="用户ID")
-    messages: List[Dict[str, str]] = Field(..., description="对话消息")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据")
+class MessageItem(BaseModel):
+    """单条消息"""
+    user_id: Union[str, int] = Field(..., description="用户ID", example=1)
+    content: str = Field(..., description="消息内容", example="今天可太热了")
+    role: str = Field(..., description="角色: user/assistant", example="user")
+    session_id: Optional[Union[str, int]] = Field(None, description="会话ID", example=123456)
+    
+    class Config:
+        schema_extra = {
+            "examples": [
+                {
+                    "user_id": 1,
+                    "content": "今天可太热了",
+                    "role": "user"
+                },
+                {
+                    "user_id": 2,
+                    "content": "是啊 都快40度了吧",
+                    "role": "user"
+                },
+                {
+                    "user_id": 3,
+                    "content": "北京今天的最高温度是34度哦",
+                    "role": "assistant"
+                }
+            ]
+        }
 
 class MemorySearchRequest(BaseModel):
     """搜索记忆请求"""
@@ -55,6 +78,7 @@ class MemoryUpdateRequest(BaseModel):
     memory_id: str = Field(..., description="记忆ID")
     content: Optional[str] = Field(default=None, description="新内容")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="新元数据")
+    session_id: Optional[int] = Field(default=None, description="会话ID")
 
 class MemoryDeleteRequest(BaseModel):
     """删除记忆请求"""
@@ -97,8 +121,12 @@ class MemoryManager:
             # 初始化Embedding客户端
             await self._init_embedding_client()
             
-            # 初始化MySQL处理器
-            await self.mysql_handler.initialize()
+            # 初始化MySQL处理器（可选）
+            if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                await self.mysql_handler.initialize()
+                logger.info("MySQL处理器已启用")
+            else:
+                logger.info("MySQL处理器已禁用")
             
             self.initialized = True
             logger.info("记忆管理器初始化成功")
@@ -203,6 +231,7 @@ class MemoryManager:
     async def _init_embedding_client(self):
         """初始化Embedding客户端"""
         embedding_provider = os.getenv("EMBEDDING_PROVIDER", "dashscope")
+        logger.info(f"开始初始化Embedding客户端: {embedding_provider}")
         
         if embedding_provider == "dashscope":
             # 阿里云通义千问 Embedding
@@ -245,58 +274,119 @@ class MemoryManager:
             
         logger.info(f"Embedding客户端初始化成功: {embedding_provider}")
     
-    async def add_memory(self, user_id: str, messages: List[Dict], metadata: Dict = None) -> Dict:
-        """添加记忆"""
+    async def add_memory(self, messages: List[MessageItem], metadata: Dict = None) -> Dict:
+        """为每个用户单独添加记忆"""
         try:
-            # 从对话中提取记忆
-            memory_content = await self._extract_memory(messages)
+            # 收集所有用户和对话内容
+            user_messages = {}  # 每个用户说的话
+            user_session_ids = {}  # 每个用户的session_id
+            all_conversation = []  # 完整对话记录
+            user_ids = set()  # 所有参与者ID
             
-            if not memory_content:
-                return {"status": "skipped", "message": "没有需要记忆的内容"}
+            for message in messages:
+                # 转换user_id为字符串
+                user_id_str = str(message.user_id)
+                
+                # 记录完整对话
+                all_conversation.append({
+                    "user_id": user_id_str,
+                    "role": message.role,
+                    "content": message.content
+                })
+                
+                # 只为role=user的用户生成记忆
+                if message.role == "user":
+                    if user_id_str not in user_messages:
+                        user_messages[user_id_str] = []
+                        user_ids.add(user_id_str)
+                        # 记录该用户的session_id
+                        if message.session_id:
+                            user_session_ids[user_id_str] = message.session_id
+                    user_messages[user_id_str].append(message.content)
             
-            # 生成embedding
-            embedding = await self._generate_embedding(memory_content)
+            if not user_messages:
+                logger.info("没有找到需要记忆的用户消息")
+                return {"status": "no_memory", "message": "没有用户消息需要记忆"}
             
-            # 生成记忆ID
-            memory_id = hashlib.md5(
-                f"{user_id}_{memory_content}_{datetime.utcnow().isoformat()}".encode()
-            ).hexdigest()
+            results = []
             
-            # 准备元数据
-            metadata = metadata or {}
-            metadata.update({
-                "user_id": user_id,
-                "created_at": datetime.utcnow().isoformat(),
-                "content": memory_content
-            })
+            # 为每个用户生成记忆
+            for user_id, contents in user_messages.items():
+                try:
+                    # 获取该用户的历史记忆内容（用于上下文）
+                    historical_content = await self._get_user_historical_content(user_id)
+                    
+                    # 生成该用户的记忆总结（传入完整对话上下文）
+                    memory_summary = await self._generate_memory_summary(
+                        user_id=user_id,
+                        user_messages=contents,
+                        all_conversation=all_conversation,
+                        historical_content=historical_content
+                    )
+                    
+                    if not memory_summary:
+                        logger.info(f"用户 {user_id} 没有需要记忆的内容")
+                        continue
+                    
+                    # 生成向量嵌入
+                    embedding = await self._generate_embedding(memory_summary)
+                    
+                    # 生成记忆ID
+                    memory_id = hashlib.md5(
+                        f"{user_id}_{memory_summary}_{datetime.utcnow().isoformat()}".encode()
+                    ).hexdigest()
+                    
+                    # 准备元数据
+                    user_metadata = (metadata or {}).copy()
+                    user_metadata.update({
+                        "user_id": user_id,
+                        "created_at": datetime.utcnow().isoformat(),
+                        "content": memory_summary
+                    })
+                    
+                    # 存储到向量数据库
+                    if os.getenv("VECTOR_DB") == "chroma":
+                        self.collection.add(
+                            ids=[memory_id],
+                            embeddings=[embedding],
+                            metadatas=[user_metadata]
+                        )
+                    
+                    # 同时存储到MySQL数据库（如果启用）
+                    if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                        try:
+                            # 获取该用户的session_id
+                            session_id = user_session_ids.get(user_id)
+                            await self.mysql_handler.insert_memory(
+                                memory_id=memory_id,
+                                user_id=user_id,
+                                content=memory_summary,
+                                metadata=user_metadata,
+                                session_id=session_id
+                            )
+                            logger.info(f"用户 {user_id} 记忆已同步到MySQL: {memory_id}")
+                        except Exception as e:
+                            logger.error(f"用户 {user_id} 同步记忆到MySQL失败，但向量数据库已保存: {e}")
+                    
+                    results.append({
+                        "user_id": user_id,
+                        "memory_id": memory_id,
+                        "status": "success",
+                        "content": memory_summary,
+                        "session_id": user_session_ids.get(user_id)
+                    })
+                    
+                    logger.info(f"用户 {user_id} 记忆添加成功: {memory_id}")
+                    
+                except Exception as e:
+                    logger.error(f"为用户 {user_id} 添加记忆失败: {e}")
+                    results.append({
+                        "user_id": user_id,
+                        "status": "error",
+                        "error": str(e)
+                    })
             
-            # 存储到向量数据库
-            if os.getenv("VECTOR_DB") == "chroma":
-                self.collection.add(
-                    ids=[memory_id],
-                    embeddings=[embedding],
-                    metadatas=[metadata]
-                )
-            
-            # 同时存储到MySQL数据库
-            try:
-                await self.mysql_handler.insert_memory(
-                    memory_id=memory_id,
-                    user_id=user_id,
-                    content=memory_content,
-                    metadata=metadata
-                )
-                logger.info(f"记忆已同步到MySQL: {memory_id}")
-            except Exception as e:
-                logger.error(f"同步记忆到MySQL失败，但向量数据库已保存: {e}")
-            
-            logger.info(f"记忆添加成功: {memory_id}")
-            
-            return {
-                "status": "success",
-                "memory_id": memory_id,
-                "content": memory_content
-            }
+            return {"status": "success", "results": results}
             
         except Exception as e:
             logger.error(f"添加记忆失败: {e}")
@@ -340,7 +430,9 @@ class MemoryManager:
             logger.error(f"搜索记忆失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def update_memory(self, memory_id: str, content: str = None, metadata: Dict = None) -> Dict:
+    async def update_memory(self, memory_id: str, content: str = None, metadata: Dict = None,
+                           event: str = None, knowledge: str = None, skill: str = None, 
+                           session_id: int = None) -> Dict:
         """更新记忆"""
         try:
             # 如果有新内容，重新生成embedding
@@ -370,16 +462,18 @@ class MemoryManager:
                         metadatas=[new_metadata]
                     )
             
-            # 同时更新MySQL数据库
-            try:
-                await self.mysql_handler.update_memory(
-                    memory_id=memory_id,
-                    content=content,
-                    metadata=metadata
-                )
-                logger.info(f"MySQL记忆已同步更新: {memory_id}")
-            except Exception as e:
-                logger.error(f"同步更新MySQL记忆失败，但向量数据库已更新: {e}")
+            # 同时更新MySQL数据库（如果启用）
+            if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                try:
+                    await self.mysql_handler.update_memory(
+                        memory_id=memory_id,
+                        content=content,
+                        metadata=metadata,
+                        session_id=session_id
+                    )
+                    logger.info(f"MySQL记忆已同步更新: {memory_id}")
+                except Exception as e:
+                    logger.error(f"同步更新MySQL记忆失败，但向量数据库已更新: {e}")
             
             logger.info(f"记忆更新成功: {memory_id}")
             
@@ -404,15 +498,16 @@ class MemoryManager:
                 else:
                     raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
             
-            # 同时从MySQL删除
-            try:
-                await self.mysql_handler.delete_memory(
-                    memory_id=memory_id,
-                    user_id=user_id
-                )
-                logger.info(f"MySQL记忆已同步删除")
-            except Exception as e:
-                logger.error(f"从MySQL删除记忆失败，但向量数据库已删除: {e}")
+            # 同时从MySQL删除（如果启用）
+            if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                try:
+                    await self.mysql_handler.delete_memory(
+                        memory_id=memory_id,
+                        user_id=user_id
+                    )
+                    logger.info(f"MySQL记忆已同步删除")
+                except Exception as e:
+                    logger.error(f"从MySQL删除记忆失败，但向量数据库已删除: {e}")
             
             return {"status": "success"}
             
@@ -555,6 +650,124 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"聊天失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+    
+    async def _get_user_historical_content(self, user_id: str) -> List[str]:
+        """获取用户的历史记忆内容"""
+        try:
+            if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                # 从MySQL获取最近的记忆
+                memories = await self.mysql_handler.get_user_memories(user_id, limit=20)
+                return [memory.get('content', '') for memory in memories if memory.get('content')]
+            else:
+                # 从向量数据库获取
+                results = self.collection.get(
+                    where={"user_id": user_id},
+                    limit=20,
+                    include=['metadatas']
+                )
+                return [meta.get('content', '') for meta in results.get('metadatas', []) if meta.get('content')]
+        except Exception as e:
+            logger.error(f"获取用户 {user_id} 历史内容失败: {e}")
+            return []
+    
+    async def _generate_memory_summary(self, user_id: str, user_messages: List[str], 
+                                     all_conversation: List[Dict], historical_content: List[str]) -> str:
+        """从时间、事件、技能、知识维度生成记忆总结"""
+        try:
+            llm_provider = os.getenv("LLM_PROVIDER", "dashscope")
+            
+            # 构建历史上下文
+            context_text = ""
+            if historical_content:
+                context_text = f"用户 {user_id} 的历史记忆：\n" + "\n".join(historical_content[-10:]) + "\n\n"
+            
+            # 构建完整对话上下文
+            conversation_text = "完整对话记录：\n"
+            for msg in all_conversation:
+                role_label = f"用户{msg['user_id']}" if msg['role'] == 'user' else f"助手{msg['user_id']}"
+                conversation_text += f"{role_label}: {msg['content']}\n"
+            
+            # 用户在本次对话中的发言
+            user_content = f"\n用户 {user_id} 在本次对话中说的话：\n" + "\n".join(user_messages)
+            
+            # 构建提示词
+            prompt = f"""请基于完整对话上下文，为用户 {user_id} 生成记忆总结。
+
+{context_text}{conversation_text}
+{user_content}
+
+请从以下维度进行分析总结：
+1. 时间：相关的时间信息或时间背景
+2. 事件：用户描述或经历的具体事件
+3. 技能：用户展示出的技能、能力或专长
+4. 知识：用户分享的知识、观点或见解
+
+要求：
+- 生成一段200字以内的总结
+- 重点关注有价值的信息
+- 如果本次对话没有值得记忆的内容，请返回空字符串
+- 总结要自然流畅，不要机械地按维度分段
+
+记忆总结："""
+            
+            if llm_provider == "dashscope":
+                from dashscope import Generation
+                
+                response = Generation.call(
+                    model=self.llm_model,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    result_format='message'
+                )
+                
+                if response.status_code == 200:
+                    summary = response.output.choices[0]['message']['content'].strip()
+                    # 如果返回空或无意义内容，返回None
+                    if not summary or len(summary) < 10 or "没有值得记忆" in summary:
+                        return None
+                    return summary
+                else:
+                    logger.error(f"LLM记忆总结生成失败: {response}")
+                    return None
+            
+            elif llm_provider == "deepseek":
+                # DeepSeek 记忆总结
+                try:
+                    response = self.llm_client.chat.completions.create(
+                        model=self.llm_model,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=500,
+                        temperature=0.7
+                    )
+                    
+                    if response.choices and len(response.choices) > 0:
+                        summary = response.choices[0].message.content.strip()
+                        # 如果返回空或无意义内容，返回None
+                        if not summary or len(summary) < 10 or "没有值得记忆" in summary:
+                            return None
+                        return summary
+                    else:
+                        logger.error(f"DeepSeek记忆总结生成失败: 没有返回内容")
+                        return None
+                        
+                except Exception as e:
+                    logger.error(f"DeepSeek记忆总结生成异常: {e}")
+                    return None
+            
+            # 其他LLM提供商的实现可以在这里添加
+            else:
+                logger.warning(f"不支持的LLM提供商: {llm_provider}")
+                # 简单的fallback逻辑
+                if user_messages:
+                    return f"用户在会话中的内容: {' '.join(user_messages[:2])}"
+                return None
+                
+        except Exception as e:
+            logger.error(f"生成记忆总结失败: {e}")
+            return None
 
 # ==========================================
 # FastAPI应用
@@ -571,7 +784,8 @@ async def lifespan(app: FastAPI):
     logger.info("Mem0服务启动成功")
     yield
     # 关闭时清理
-    await memory_manager.mysql_handler.close()
+    if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+        await memory_manager.mysql_handler.close()
     logger.info("Mem0服务正在关闭")
 
 # 创建FastAPI应用
@@ -626,15 +840,41 @@ async def health_check():
 
 @app.post("/api/v1/memories/add")
 async def add_memory(
-    request: MemoryAddRequest,
+    messages: List[MessageItem] = Body(
+        ...,
+        example=[
+            {
+                "user_id": 1,
+                "content": "今天可太热了",
+                "role": "user",
+                "session_id": 123456
+            },
+            {
+                "user_id": 2,
+                "content": "是啊 都快40度了吧",
+                "role": "user",
+                "session_id": 123456
+            },
+            {
+                "user_id": 3,
+                "content": "北京今天的最高温度是34度哦",
+                "role": "assistant",
+                "session_id": 123456
+            }
+        ],
+        description="消息数组，包含多个用户的对话内容"
+    ),
     token: str = Depends(verify_token)
 ):
-    """添加记忆"""
-    return await memory_manager.add_memory(
-        user_id=request.user_id,
-        messages=request.messages,
-        metadata=request.metadata
-    )
+    """
+    添加记忆 - 接收消息数组，为每个user生成记忆
+    
+    - 支持多用户对话场景
+    - 只为 role='user' 的消息生成记忆
+    - role='assistant' 的消息作为上下文但不生成记忆
+    - 每个用户会根据完整对话上下文生成独立的记忆总结
+    """
+    return await memory_manager.add_memory(messages=messages)
 
 @app.post("/api/v1/memories/search")
 async def search_memory(
@@ -658,7 +898,8 @@ async def update_memory(
     return await memory_manager.update_memory(
         memory_id=request.memory_id,
         content=request.content,
-        metadata=request.metadata
+        metadata=request.metadata,
+        session_id=request.session_id
     )
 
 @app.post("/api/v1/memories/delete")
@@ -701,23 +942,41 @@ async def get_user_memories(
     
     return {"memories": memories, "count": len(memories)}
 
-@app.get("/api/v1/mysql/users/{user_id}/memories")
-async def get_user_mysql_memories(
-    user_id: str,
+@app.get("/api/v1/mysql/memories")
+async def get_mysql_memories(
+    user_id: Optional[str] = None,
+    session_id: Optional[Union[str, int]] = None,
     limit: int = 100,
     offset: int = 0,
     token: str = Depends(verify_token)
 ):
-    """从MySQL获取用户的所有记忆"""
+    """
+    从MySQL获取记忆数据
+    
+    - user_id: 可选，用户ID筛选
+    - session_id: 可选，会话ID筛选  
+    - 如果都不传则查询所有记忆
+    - 支持分页查询
+    """
+    if os.getenv("ENABLE_MYSQL", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="MySQL未启用")
     try:
-        memories = await memory_manager.mysql_handler.get_user_memories(
+        memories = await memory_manager.mysql_handler.get_memories_with_filters(
             user_id=user_id,
+            session_id=session_id,
             limit=limit,
             offset=offset
         )
-        return {"memories": memories, "count": len(memories)}
+        return {
+            "memories": memories, 
+            "count": len(memories),
+            "filters": {
+                "user_id": user_id,
+                "session_id": session_id
+            }
+        }
     except Exception as e:
-        logger.error(f"从MySQL获取用户记忆失败: {e}")
+        logger.error(f"从MySQL获取记忆失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/mysql/memories/{memory_id}")
@@ -726,6 +985,8 @@ async def get_mysql_memory(
     token: str = Depends(verify_token)
 ):
     """从MySQL获取单个记忆"""
+    if os.getenv("ENABLE_MYSQL", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="MySQL未启用")
     try:
         memory = await memory_manager.mysql_handler.get_memory(memory_id)
         if not memory:
@@ -743,6 +1004,8 @@ async def search_mysql_memories_by_time(
     token: str = Depends(verify_token)
 ):
     """按时间范围搜索MySQL中的记忆"""
+    if os.getenv("ENABLE_MYSQL", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="MySQL未启用")
     try:
         start_dt = datetime.fromisoformat(start_time)
         end_dt = datetime.fromisoformat(end_time)

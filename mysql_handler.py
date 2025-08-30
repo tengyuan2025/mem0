@@ -6,7 +6,7 @@ MySQL数据库处理模块
 import aiomysql
 import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from loguru import logger
 import json
 
@@ -105,11 +105,7 @@ class MySQLHandler:
                         memory_id VARCHAR(255) NOT NULL COMMENT '记忆ID',
                         session_id BIGINT COMMENT '会话id',
                         user_id VARCHAR(255) NOT NULL COMMENT '用户id',
-                        event VARCHAR(1000) COMMENT '事件',
-                        time DATETIME COMMENT '事件发生的时间',
-                        knowledge VARCHAR(1000) COMMENT '知识',
-                        skill VARCHAR(1000) COMMENT '技能',
-                        content TEXT COMMENT '记忆内容',
+                        content TEXT COMMENT '记忆内容总结',
                         metadata JSON COMMENT '元数据',
                         embedding_provider VARCHAR(100) COMMENT 'Embedding提供者',
                         llm_provider VARCHAR(100) COMMENT 'LLM提供者',
@@ -118,6 +114,7 @@ class MySQLHandler:
                         PRIMARY KEY (id),
                         INDEX idx_memory_id (memory_id),
                         INDEX idx_user_id (user_id),
+                        INDEX idx_session_user (session_id, user_id),
                         INDEX idx_created_at (created_at)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='记忆';
                     """
@@ -132,9 +129,6 @@ class MySQLHandler:
                           user_id: str,
                           content: str,
                           metadata: Optional[Dict[str, Any]] = None,
-                          event: Optional[str] = None,
-                          knowledge: Optional[str] = None,
-                          skill: Optional[str] = None,
                           session_id: Optional[int] = None) -> int:
         """插入记忆到MySQL"""
         try:
@@ -145,31 +139,20 @@ class MySQLHandler:
                     embedding_provider = os.getenv("EMBEDDING_PROVIDER", "dashscope")
                     llm_provider = os.getenv("LLM_PROVIDER", "dashscope")
                     
-                    # 从content中智能提取event、knowledge和skill（如果未提供）
-                    if not event and not knowledge and not skill:
-                        event, knowledge, skill = await self._extract_memory_components(content)
-                    
                     # 插入数据
                     insert_sql = """
                     INSERT INTO memory (
-                        memory_id, user_id, content, metadata, 
-                        event, knowledge, skill, session_id,
-                        time, embedding_provider, llm_provider, 
-                        created_at, updated_at
+                        memory_id, user_id, content, metadata, session_id,
+                        embedding_provider, llm_provider, created_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, 
-                        %s, %s, %s, %s,
-                        %s, %s, %s, 
-                        %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """
                     
                     now = datetime.now()
                     values = (
-                        memory_id, user_id, content, metadata_json,
-                        event, knowledge, skill, session_id,
-                        now, embedding_provider, llm_provider,
-                        now, now
+                        memory_id, user_id, content, metadata_json, session_id,
+                        embedding_provider, llm_provider, now, now
                     )
                     
                     await cursor.execute(insert_sql, values)
@@ -188,9 +171,7 @@ class MySQLHandler:
                           memory_id: str,
                           content: Optional[str] = None,
                           metadata: Optional[Dict[str, Any]] = None,
-                          event: Optional[str] = None,
-                          knowledge: Optional[str] = None,
-                          skill: Optional[str] = None) -> bool:
+                          session_id: Optional[int] = None) -> bool:
         """更新MySQL中的记忆"""
         try:
             async with self.pool.acquire() as conn:
@@ -207,17 +188,9 @@ class MySQLHandler:
                         update_parts.append("metadata = %s")
                         values.append(json.dumps(metadata, ensure_ascii=False))
                     
-                    if event is not None:
-                        update_parts.append("event = %s")
-                        values.append(event)
-                    
-                    if knowledge is not None:
-                        update_parts.append("knowledge = %s")
-                        values.append(knowledge)
-                    
-                    if skill is not None:
-                        update_parts.append("skill = %s")
-                        values.append(skill)
+                    if session_id is not None:
+                        update_parts.append("session_id = %s")
+                        values.append(session_id)
                     
                     if not update_parts:
                         return False
@@ -317,6 +290,54 @@ class MySQLHandler:
                     
         except Exception as e:
             logger.error(f"从MySQL获取用户记忆失败: {e}")
+            raise
+    
+    async def get_memories_with_filters(self, 
+                                       user_id: str = None,
+                                       session_id: Union[str, int] = None,
+                                       limit: int = 100,
+                                       offset: int = 0) -> List[Dict[str, Any]]:
+        """根据user_id和session_id筛选查询记忆"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    # 构建查询条件
+                    where_conditions = []
+                    values = []
+                    
+                    if user_id:
+                        where_conditions.append("user_id = %s")
+                        values.append(user_id)
+                    
+                    if session_id:
+                        where_conditions.append("session_id = %s")
+                        values.append(session_id)
+                    
+                    # 构建SQL语句
+                    where_clause = ""
+                    if where_conditions:
+                        where_clause = "WHERE " + " AND ".join(where_conditions)
+                    
+                    select_sql = f"""
+                    SELECT * FROM memory 
+                    {where_clause}
+                    ORDER BY created_at DESC 
+                    LIMIT %s OFFSET %s
+                    """
+                    values.extend([limit, offset])
+                    
+                    await cursor.execute(select_sql, values)
+                    results = await cursor.fetchall()
+                    
+                    # 解析JSON字段
+                    for result in results:
+                        if result.get('metadata'):
+                            result['metadata'] = json.loads(result['metadata'])
+                    
+                    return results
+                    
+        except Exception as e:
+            logger.error(f"从MySQL筛选查询记忆失败: {e}")
             raise
     
     async def _extract_memory_components(self, content: str) -> tuple:

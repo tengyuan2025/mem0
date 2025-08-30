@@ -16,6 +16,9 @@ transformers
 # 向量数据库
 chromadb
 
+# 数据库连接
+aiomysql
+
 # 可选的国内LLM服务（按需安装）
 # dashscope  # 阿里云通义千问
 # qianfan    # 百度文心一言

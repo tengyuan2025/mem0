@@ -76,11 +76,13 @@ Authorization: Bearer your-secret-key-change-this
   "messages": [
     {
       "role": "user", 
-      "content": "用户消息内容"
+      "content": "用户消息内容",
+      "session_id": "123456"
     },
     {
       "role": "assistant", 
-      "content": "助手回复内容"
+      "content": "助手回复内容",
+      "session_id": "123456"
     }
   ],
   "metadata": {
@@ -118,6 +120,7 @@ Authorization: Bearer your-secret-key-change-this
     "memory_id": "f310ee51e7a9",
     "content": "记忆内容",
     "score": 0.647,
+    "session_id": "123456",
     "metadata": {
       "user_id": "用户ID",
       "created_at": "2025-08-27T09:10:29.447142",
@@ -158,6 +161,7 @@ Authorization: Bearer your-secret-key-change-this
       "memory_id": "f310ee51e7a9",
       "content": "记忆内容",
       "keywords_count": 87,
+      "session_id": "123456",
       "metadata": {
         "category": "分类",
         "created_at": "2025-08-27T09:10:29.447142"
@@ -210,8 +214,8 @@ curl -X POST "http://localhost:8000/api/v1/memories/add" \
   -d '{
     "user_id": "test001",
     "messages": [
-      {"role": "user", "content": "我喜欢喝拿铁咖啡"},
-      {"role": "assistant", "content": "记住了，您喜欢拿铁咖啡"}
+      {"role": "user", "content": "我喜欢喝拿铁咖啡", "session_id": "123456"},
+      {"role": "assistant", "content": "记住了，您喜欢拿铁咖啡", "session_id": "123456"}
     ],
     "metadata": {"category": "偏好", "type": "饮品"}
   }'

@@ -110,27 +110,85 @@ case $choice in
         echo "🔧 激活虚拟环境..."
         source venv/bin/activate
         
-        # 安装依赖
-        echo "📥 安装核心依赖..."
-        pip install -r requirements-core.txt
+        # 检查并安装依赖
+        if [ ! -f "venv/.deps_installed" ] || [ "requirements-core.txt" -nt "venv/.deps_installed" ]; then
+            echo "📥 检测到依赖需要安装或更新，正在安装核心依赖..."
+            pip install -r requirements-core.txt
+            touch venv/.deps_installed
+            echo "✅ 依赖安装完成"
+        else
+            echo "✅ 依赖已是最新版本，跳过安装步骤"
+        fi
         
         echo ""
-        echo "⚠️  请确保以下服务已经运行："
-        echo "- PostgreSQL (端口 5432)"
-        echo "- Redis (端口 6379)"
-        echo "- ChromaDB (端口 8001)"
+        echo "ℹ️  服务依赖说明："
+        echo "- ChromaDB: 使用本地持久化存储，无需启动服务"
+        echo "- MySQL: 可选，如需启用请设置 ENABLE_MYSQL=true 并启动服务"
         echo ""
-        read -p "是否继续？(y/n): " confirm
         
-        if [ "$confirm" != "y" ]; then
-            echo "已取消"
-            exit 0
+        # 检查MySQL配置并提示
+        if grep -q "ENABLE_MYSQL=true" .env 2>/dev/null; then
+            echo "ℹ️  检测到 MySQL 已启用，如未启动服务可能会有连接错误"
+        else
+            echo "ℹ️  使用本地存储模式"
         fi
         
         # 启动服务
         echo ""
         echo "🚀 启动API服务..."
-        python app.py
+        echo ""
+        
+        # 后台启动服务
+        python app.py &
+        APP_PID=$!
+        
+        # 等待服务启动
+        echo "⏳ 等待服务启动..."
+        sleep 3
+        
+        # 检查服务是否启动成功
+        if kill -0 $APP_PID 2>/dev/null; then
+            echo ""
+            echo "✅ Mem0 自托管服务启动成功！"
+            echo ""
+            echo "=========================================="
+            echo "           服务访问地址"
+            echo "=========================================="
+            echo "🌐 API 服务:      http://localhost:8000"
+            echo "📖 API 文档:      http://localhost:8000/docs"
+            echo "🔧 健康检查:      http://localhost:8000/health"
+            echo ""
+            
+            # 显示配置信息
+            echo "=========================================="
+            echo "           服务配置信息"
+            echo "=========================================="
+            if grep -q "ENABLE_MYSQL=true" .env 2>/dev/null; then
+                echo "💾 MySQL:        已启用"
+            else
+                echo "💾 MySQL:        未启用"
+            fi
+            echo "🗂️  ChromaDB:     本地持久化存储"
+            echo "🤖 LLM Provider: $(grep "^LLM_PROVIDER=" .env 2>/dev/null | cut -d'=' -f2 | head -1)"
+            echo "🔤 Embedding:    $(grep "^EMBEDDING_PROVIDER=" .env 2>/dev/null | cut -d'=' -f2 | head -1)"
+            echo ""
+            
+            echo "=========================================="
+            echo "           使用说明"
+            echo "=========================================="
+            echo "• 停止服务: 按 Ctrl+C"
+            echo "• 查看日志: 服务运行中会显示实时日志"
+            echo "• 测试接口: curl http://localhost:8000/health"
+            echo ""
+            echo "🎉 服务已就绪，开始使用吧！"
+            echo ""
+            
+            # 等待用户停止服务
+            wait $APP_PID
+        else
+            echo "❌ 服务启动失败，请检查错误信息"
+            exit 1
+        fi
         ;;
         
     3)
