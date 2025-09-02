@@ -366,30 +366,20 @@ class MemoryManager:
                         f"{user_id}_{memory_content}_{datetime.utcnow().isoformat()}".encode()
                     ).hexdigest()
                     
-                    # 准备元数据，包含同一session的所有对话记录
-                    user_session_id = user_session_ids.get(user_id)
-                    session_conversations = []
-                    
-                    # 获取同一session的所有对话记录
-                    if user_session_id:
-                        for message_item in messages:
-                            if str(message_item.session_id) == str(user_session_id):
-                                session_conversations.append({
-                                    "user_id": str(message_item.user_id),
-                                    "role": message_item.role,
-                                    "content": message_item.content
-                                })
-                    else:
-                        # 如果没有session_id，则存储所有对话
-                        session_conversations = all_conversation
-                    
-                    user_metadata = (metadata or {}).copy()
-                    user_metadata.update({
-                        "user_id": user_id,
-                        "created_at": datetime.utcnow().isoformat(),
-                        "content": memory_content,
-                        "original_conversations": session_conversations  # 存储原始对话
-                    })
+                    # 准备元数据 - 存储原始的messages数据
+                    metadata_to_store = {
+                        "original_messages": [
+                            {
+                                "user_id": str(msg.user_id),
+                                "content": msg.content,
+                                "role": msg.role,
+                                "session_id": msg.session_id
+                            } for msg in messages
+                        ]
+                    }
+                    # 如果用户传入了metadata参数，也保存
+                    if metadata:
+                        metadata_to_store.update(metadata)
                     
                     # 存储到向量数据库 (Qdrant)
                     from qdrant_client.models import PointStruct
@@ -424,7 +414,7 @@ class MemoryManager:
                                 knowledge=memory_dimensions.get('knowledge'),
                                 skill=memory_dimensions.get('skill'),
                                 preference=memory_dimensions.get('preference'),
-                                metadata=user_metadata,
+                                metadata=metadata_to_store,
                                 session_id=session_id
                             )
                             logger.info(f"用户 {user_id} 记忆已同步到MySQL: {memory_id}")
