@@ -243,6 +243,24 @@ class MySQLHandler:
             logger.error(f"从MySQL删除记忆失败: {e}")
             raise
     
+    async def clear_all_memories(self) -> int:
+        """清除MySQL中的所有记忆数据"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    # 删除所有记忆
+                    delete_sql = "DELETE FROM memory"
+                    await cursor.execute(delete_sql)
+                    
+                    affected_rows = cursor.rowcount
+                    
+                    logger.info(f"MySQL所有记忆清除完成, 删除记录数: {affected_rows}")
+                    return affected_rows
+                    
+        except Exception as e:
+            logger.error(f"清除MySQL所有记忆失败: {e}")
+            raise
+    
     async def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
         """从MySQL获取单个记忆"""
         try:

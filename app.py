@@ -137,52 +137,63 @@ class MemoryManager:
     
     async def _init_vector_db(self):
         """初始化向量数据库"""
-        vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "chroma")
+        vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant")
         
-        if vector_db_type == "chroma":
-            import chromadb
-            from chromadb.config import Settings
-            
-            # 检查是否使用持久化存储
-            if os.getenv("MEM0_VECTOR_STORE_TYPE") == "persistent":
-                persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY", "./data/chroma")
-                os.makedirs(persist_dir, exist_ok=True)
-                self.vector_db = chromadb.PersistentClient(path=persist_dir)
-            else:
-                self.vector_db = chromadb.HttpClient(
-                    host=os.getenv("CHROMA_HOST", "localhost"),
-                    port=int(os.getenv("CHROMA_PORT", 8001))
-                )
-            
-            # 创建或获取集合
-            collection_name = os.getenv("CHROMA_COLLECTION", "mem0_memories")
-            try:
-                self.collection = self.vector_db.get_collection(collection_name)
-            except:
-                self.collection = self.vector_db.create_collection(
-                    name=collection_name,
-                    metadata={"hnsw:space": "cosine"}
-                )
-                
-        elif vector_db_type == "qdrant":
+        if vector_db_type == "qdrant":
             from qdrant_client import QdrantClient
+            from qdrant_client.models import Distance, VectorParams
             
-            self.vector_db = QdrantClient(
-                host=os.getenv("QDRANT_HOST", "localhost"),
-                port=int(os.getenv("QDRANT_PORT", 6333)),
-                api_key=os.getenv("QDRANT_API_KEY")
-            )
+            # 检查是否连接到远程服务器还是使用本地
+            qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+            qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
             
-        elif vector_db_type == "faiss":
-            import faiss
-            import numpy as np
+            if qdrant_host == "localhost" and not self._check_qdrant_server():
+                # 使用内存存储
+                self.vector_db = QdrantClient(location=":memory:")
+                logger.info("使用 Qdrant 内存存储")
+            else:
+                # 连接到服务器
+                self.vector_db = QdrantClient(
+                    host=qdrant_host,
+                    port=qdrant_port
+                )
+                logger.info(f"连接到 Qdrant 服务器: {qdrant_host}:{qdrant_port}")
             
-            # 初始化FAISS索引
-            dimension = 1536  # 默认embedding维度
-            self.vector_db = faiss.IndexFlatL2(dimension)
-            self.faiss_metadata = {}  # 存储元数据
+            # 集合配置
+            collection_name = os.getenv("QDRANT_COLLECTION", "mem0_memories")
+            dimension = 1024  # bge-large-zh-v1.5 模型维度
+            
+            # 检查集合是否存在
+            try:
+                collection_info = self.vector_db.get_collection(collection_name)
+                logger.info(f"使用现有 Qdrant 集合: {collection_name}")
+            except Exception:
+                # 创建集合
+                self.vector_db.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(size=dimension, distance=Distance.COSINE)
+                )
+                logger.info(f"创建新 Qdrant 集合: {collection_name}")
+            
+            # 存储集合名称
+            self.collection_name = collection_name
+            
+        else:
+            raise ValueError(f"不支持的向量数据库类型: {vector_db_type}")
             
         logger.info(f"向量数据库初始化成功: {vector_db_type}")
+    
+    def _check_qdrant_server(self):
+        """检查Qdrant服务器是否可用"""
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('localhost', 6333))
+            sock.close()
+            return result == 0
+        except:
+            return False
     
     async def _init_llm_client(self):
         """初始化LLM客户端"""
@@ -344,13 +355,24 @@ class MemoryManager:
                         "content": memory_summary
                     })
                     
-                    # 存储到向量数据库
-                    if os.getenv("VECTOR_DB") == "chroma":
-                        self.collection.add(
-                            ids=[memory_id],
-                            embeddings=[embedding],
-                            metadatas=[user_metadata]
-                        )
+                    # 存储到向量数据库 (Qdrant)
+                    from qdrant_client.models import PointStruct
+                    
+                    # 准备插入数据
+                    point = PointStruct(
+                        id=memory_id,
+                        vector=embedding,
+                        payload={
+                            "user_id": user_id,
+                            "content": memory_summary,
+                            "created_at": datetime.utcnow().isoformat(),
+                            "session_id": user_session_ids.get(user_id, "")
+                        }
+                    )
+                    self.vector_db.upsert(
+                        collection_name=self.collection_name,
+                        points=[point]
+                    )
                     
                     # 同时存储到MySQL数据库（如果启用）
                     if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
@@ -398,29 +420,44 @@ class MemoryManager:
             # 生成查询的embedding
             query_embedding = await self._generate_embedding(query)
             
-            # 从向量数据库搜索
-            if os.getenv("VECTOR_DB") == "chroma":
-                # 构建查询条件
-                where = {"user_id": user_id}
-                if filters:
-                    where.update(filters)
-                
-                results = self.collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=limit,
-                    where=where
-                )
-                
-                # 格式化结果
-                memories = []
-                if results["metadatas"]:
-                    for i, metadata in enumerate(results["metadatas"][0]):
-                        memories.append({
-                            "memory_id": results["ids"][0][i],
-                            "content": metadata.get("content", ""),
-                            "score": 1 - results["distances"][0][i] if results["distances"] else 0,
-                            "metadata": metadata
-                        })
+            # 从向量数据库搜索 (Qdrant)
+            memories = []
+            
+            # 构建过滤器
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            filter_conditions = [
+                FieldCondition(key="user_id", match=MatchValue(value=user_id))
+            ]
+            
+            if filters:
+                for key, value in filters.items():
+                    if key != "user_id":
+                        filter_conditions.append(
+                            FieldCondition(key=key, match=MatchValue(value=value))
+                        )
+            
+            # 执行搜索
+            search_result = self.vector_db.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                query_filter=Filter(must=filter_conditions),
+                limit=limit,
+                with_payload=True
+            )
+            
+            # 格式化结果
+            for point in search_result:
+                memories.append({
+                    "memory_id": point.id,
+                    "content": point.payload.get("content", ""),
+                    "score": point.score,
+                    "metadata": {
+                        "user_id": point.payload.get("user_id", ""),
+                        "created_at": point.payload.get("created_at", ""),
+                        "session_id": point.payload.get("session_id", "")
+                    }
+                })
             
             logger.info(f"搜索记忆成功，找到 {len(memories)} 条记录")
             
@@ -486,7 +523,8 @@ class MemoryManager:
     async def delete_memory(self, memory_id: str = None, user_id: str = None) -> Dict:
         """删除记忆"""
         try:
-            if os.getenv("VECTOR_DB") == "chroma":
+            vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "chroma")
+            if vector_db_type == "chroma":
                 if memory_id:
                     # 删除特定记忆
                     self.collection.delete(ids=[memory_id])
@@ -494,6 +532,25 @@ class MemoryManager:
                 elif user_id:
                     # 删除用户的所有记忆
                     self.collection.delete(where={"user_id": user_id})
+                    logger.info(f"用户 {user_id} 的所有记忆删除成功")
+                else:
+                    raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
+            elif vector_db_type == "milvus":
+                if memory_id:
+                    # 删除特定记忆
+                    delete_expr = f'id == "{memory_id}"'
+                    self.vector_db.delete(
+                        collection_name=self.collection_name,
+                        filter=delete_expr
+                    )
+                    logger.info(f"记忆删除成功: {memory_id}")
+                elif user_id:
+                    # 删除用户的所有记忆
+                    delete_expr = f'user_id == "{user_id}"'
+                    self.vector_db.delete(
+                        collection_name=self.collection_name,
+                        filter=delete_expr
+                    )
                     logger.info(f"用户 {user_id} 的所有记忆删除成功")
                 else:
                     raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
@@ -513,6 +570,74 @@ class MemoryManager:
             
         except Exception as e:
             logger.error(f"删除记忆失败: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def clear_all_data(self) -> Dict:
+        """清除所有数据（向量数据库和MySQL）"""
+        try:
+            results = {
+                "vector_db": {"status": "skipped"},
+                "mysql": {"status": "skipped"}
+            }
+            
+            # 清除向量数据库 (Qdrant)
+            try:
+                collection_name = self.collection_name
+                
+                # 获取数据数量（用于统计）
+                collection_info = self.vector_db.get_collection(collection_name)
+                count_before = collection_info.points_count if collection_info else 0
+                
+                if count_before > 0:
+                    # 删除集合中的所有数据
+                    self.vector_db.delete_collection(collection_name)
+                    
+                    # 重新创建集合
+                    from qdrant_client.models import Distance, VectorParams
+                    self.vector_db.create_collection(
+                        collection_name=collection_name,
+                        vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
+                    )
+                    
+                    logger.info(f"Qdrant 向量数据库清除成功: 删除了 {count_before} 条记录")
+                    results["vector_db"] = {
+                        "status": "success",
+                        "deleted_count": count_before
+                    }
+                else:
+                    logger.info("向量数据库已为空")
+                    results["vector_db"] = {
+                        "status": "success",
+                        "deleted_count": 0
+                    }
+            except Exception as e:
+                logger.error(f"清除向量数据库失败: {e}")
+                results["vector_db"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # 清除MySQL数据库
+            if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                try:
+                    # 清除MySQL中的所有记忆
+                    deleted_count = await self.mysql_handler.clear_all_memories()
+                    logger.info(f"MySQL数据库清除成功: 删除了 {deleted_count} 条记录")
+                    results["mysql"] = {
+                        "status": "success",
+                        "deleted_count": deleted_count
+                    }
+                except Exception as e:
+                    logger.error(f"清除MySQL数据库失败: {e}")
+                    results["mysql"] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"清除所有数据失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
     async def _extract_memory(self, messages: List[Dict]) -> str:
@@ -830,7 +955,7 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "llm_provider": os.getenv("LLM_PROVIDER", "dashscope"),
-        "vector_db": os.getenv("VECTOR_DB", "chroma")
+        "vector_db": os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant")
     }
 
 @app.get("/health")
@@ -1020,6 +1145,31 @@ async def search_mysql_memories_by_time(
         raise HTTPException(status_code=400, detail="时间格式错误，请使用ISO格式如：2023-01-01T00:00:00")
     except Exception as e:
         logger.error(f"按时间搜索MySQL记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/v1/memories/clear-all")
+async def clear_all_data(
+    token: str = Depends(verify_token)
+):
+    """清除所有数据（向量数据库和MySQL）- 危险操作"""
+    logger.warning("收到清除所有数据的请求")
+    
+    try:
+        results = await memory_manager.clear_all_data()
+        
+        # 记录操作结果
+        if results["vector_db"]["status"] == "success":
+            logger.info(f"向量数据库清除成功: {results['vector_db']['deleted_count']} 条记录")
+        if results["mysql"]["status"] == "success":
+            logger.info(f"MySQL数据库清除成功: {results['mysql']['deleted_count']} 条记录")
+            
+        return {
+            "status": "success",
+            "message": "所有数据已清除",
+            "details": results
+        }
+    except Exception as e:
+        logger.error(f"清除所有数据失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

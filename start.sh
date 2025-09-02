@@ -28,8 +28,9 @@ echo "请选择启动方式："
 echo "1) Docker Compose（推荐，包含所有服务）"
 echo "2) 本地Python环境（需要手动安装数据库）"
 echo "3) 仅启动API服务（Docker）"
+echo "4) 启动 Milvus 向量数据库（Docker）"
 echo ""
-read -p "请输入选项 (1-3): " choice
+read -p "请输入选项 (1-4): " choice
 
 case $choice in
     1)
@@ -133,6 +134,10 @@ case $choice in
             echo "ℹ️  使用本地存储模式"
         fi
         
+        # 设置NO_PROXY环境变量，避免本地访问被代理
+        export NO_PROXY=localhost,127.0.0.1,0.0.0.0
+        export no_proxy=localhost,127.0.0.1,0.0.0.0
+        
         # 启动服务
         echo ""
         echo "🚀 启动API服务..."
@@ -218,6 +223,64 @@ case $choice in
         echo "- API文档: http://localhost:8000/docs"
         echo ""
         echo "⚠️  注意：您需要单独配置和启动数据库服务"
+        ;;
+        
+    4)
+        echo ""
+        echo "🚀 启动 Milvus 向量数据库..."
+        
+        # 检查Docker是否安装
+        if ! command -v docker &> /dev/null; then
+            echo "❌ Docker 未安装，请先安装 Docker"
+            exit 1
+        fi
+        
+        # 检查Docker服务是否运行
+        if ! docker info &> /dev/null; then
+            echo "❌ Docker 服务未运行"
+            echo "请启动 Docker Desktop 或运行: sudo systemctl start docker"
+            exit 1
+        fi
+        
+        if ! command -v docker-compose &> /dev/null; then
+            # 尝试使用docker compose命令（新版本）
+            if docker compose version &> /dev/null; then
+                echo "✅ 检测到 Docker Compose (docker compose)"
+                docker compose -f docker-compose-milvus.yml up -d
+            else
+                echo "❌ Docker Compose 未安装，请先安装 Docker Compose"
+                exit 1
+            fi
+        else
+            echo "✅ 检测到 Docker Compose (docker-compose)"
+            docker-compose -f docker-compose-milvus.yml up -d
+        fi
+        
+        echo ""
+        echo "⏳ 等待 Milvus 服务启动..."
+        sleep 15
+        
+        # 检查服务状态
+        if docker compose version &> /dev/null; then
+            docker compose -f docker-compose-milvus.yml ps
+        else
+            docker-compose -f docker-compose-milvus.yml ps
+        fi
+        
+        echo ""
+        echo "✅ Milvus 向量数据库已启动！"
+        echo ""
+        echo "服务访问地址："
+        echo "- Milvus 服务: localhost:19530"
+        echo "- MinIO 控制台: http://localhost:9001 (minioadmin/minioadmin)"
+        echo "- MinIO API: http://localhost:9000"
+        echo ""
+        echo "现在你可以启动 Mem0 API 服务："
+        echo "- 使用选项2：本地Python环境启动"
+        echo "- 或直接运行: python app.py"
+        echo ""
+        echo "停止 Milvus 服务："
+        echo "- docker compose -f docker-compose-milvus.yml down"
         ;;
         
     *)
