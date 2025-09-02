@@ -328,43 +328,79 @@ class MemoryManager:
                     historical_content = await self._get_user_historical_content(user_id)
                     
                     # 生成该用户的记忆总结（传入完整对话上下文）
-                    memory_summary = await self._generate_memory_summary(
+                    memory_dimensions = await self._generate_memory_summary(
                         user_id=user_id,
                         user_messages=contents,
                         all_conversation=all_conversation,
                         historical_content=historical_content
                     )
                     
-                    if not memory_summary:
+                    if not memory_dimensions or not any(memory_dimensions.values()):
+                        logger.info(f"用户 {user_id} 没有需要记忆的内容")
+                        continue
+                    
+                    # 组合所有有效维度形成完整记忆内容
+                    memory_parts = []
+                    if memory_dimensions.get('event'):
+                        memory_parts.append(memory_dimensions['event'])
+                    if memory_dimensions.get('preference'):
+                        memory_parts.append(memory_dimensions['preference'])
+                    if memory_dimensions.get('knowledge'):
+                        memory_parts.append(memory_dimensions['knowledge'])
+                    if memory_dimensions.get('skill'):
+                        memory_parts.append(memory_dimensions['skill'])
+                    if memory_dimensions.get('time'):
+                        memory_parts.append(memory_dimensions['time'])
+                    
+                    memory_content = '，'.join(memory_parts)
+                    
+                    if not memory_content:
                         logger.info(f"用户 {user_id} 没有需要记忆的内容")
                         continue
                     
                     # 生成向量嵌入
-                    embedding = await self._generate_embedding(memory_summary)
+                    embedding = await self._generate_embedding(memory_content)
                     
                     # 生成记忆ID
                     memory_id = hashlib.md5(
-                        f"{user_id}_{memory_summary}_{datetime.utcnow().isoformat()}".encode()
+                        f"{user_id}_{memory_content}_{datetime.utcnow().isoformat()}".encode()
                     ).hexdigest()
                     
-                    # 准备元数据
+                    # 准备元数据，包含同一session的所有对话记录
+                    user_session_id = user_session_ids.get(user_id)
+                    session_conversations = []
+                    
+                    # 获取同一session的所有对话记录
+                    if user_session_id:
+                        for message_item in messages:
+                            if str(message_item.session_id) == str(user_session_id):
+                                session_conversations.append({
+                                    "user_id": str(message_item.user_id),
+                                    "role": message_item.role,
+                                    "content": message_item.content
+                                })
+                    else:
+                        # 如果没有session_id，则存储所有对话
+                        session_conversations = all_conversation
+                    
                     user_metadata = (metadata or {}).copy()
                     user_metadata.update({
                         "user_id": user_id,
                         "created_at": datetime.utcnow().isoformat(),
-                        "content": memory_summary
+                        "content": memory_content,
+                        "original_conversations": session_conversations  # 存储原始对话
                     })
                     
                     # 存储到向量数据库 (Qdrant)
                     from qdrant_client.models import PointStruct
                     
-                    # 准备插入数据
+                    # 准备插入数据到向量数据库
                     point = PointStruct(
                         id=memory_id,
                         vector=embedding,
                         payload={
                             "user_id": user_id,
-                            "content": memory_summary,
+                            "content": memory_content,
                             "created_at": datetime.utcnow().isoformat(),
                             "session_id": user_session_ids.get(user_id, "")
                         }
@@ -382,7 +418,12 @@ class MemoryManager:
                             await self.mysql_handler.insert_memory(
                                 memory_id=memory_id,
                                 user_id=user_id,
-                                content=memory_summary,
+                                content=memory_content,
+                                event=memory_dimensions.get('event'),
+                                time=memory_dimensions.get('time'),
+                                knowledge=memory_dimensions.get('knowledge'),
+                                skill=memory_dimensions.get('skill'),
+                                preference=memory_dimensions.get('preference'),
                                 metadata=user_metadata,
                                 session_id=session_id
                             )
@@ -394,7 +435,7 @@ class MemoryManager:
                         "user_id": user_id,
                         "memory_id": memory_id,
                         "status": "success",
-                        "content": memory_summary,
+                        "content": memory_content,
                         "session_id": user_session_ids.get(user_id)
                     })
                     
@@ -640,26 +681,74 @@ class MemoryManager:
             logger.error(f"清除所有数据失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def _extract_memory(self, messages: List[Dict]) -> str:
-        """从对话中提取记忆"""
+    async def _extract_memory(self, messages: List[Dict]) -> Dict[str, str]:
+        """从对话中提取记忆，返回5个维度的结构化信息"""
         # 构建提取记忆的prompt
         conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         
         prompt = f"""
-        请从以下对话中提取重要的信息作为长期记忆。
-        只提取关键信息，如用户偏好、重要事实、个人信息等。
-        如果没有值得记忆的内容，返回空字符串。
-        
-        对话：
-        {conversation}
-        
-        提取的记忆（中文）：
+请从以下对话中提取重要信息作为用户记忆，按以下5个维度分析：
+
+1. 事件：发生了什么具体事情
+2. 时间：相关的时间信息  
+3. 技能：展示的技能或能力
+4. 知识：分享的知识或专业信息
+5. 偏好：表达的喜好或倾向
+
+要求：
+- 每个维度最多一句话，简洁准确
+- 没有相关信息的维度输出"无"
+- 不要过度解读或推测
+- 用中文回答
+
+对话：
+{conversation}
+
+请按照以下格式输出：
+事件：[事件信息或"无"]
+时间：[时间信息或"无"] 
+技能：[技能信息或"无"]
+知识：[知识信息或"无"]
+偏好：[偏好信息或"无"]
         """
         
         # 调用LLM提取记忆
-        memory = await self._call_llm(prompt)
+        memory_response = await self._call_llm(prompt)
         
-        return memory.strip()
+        # 解析LLM响应，提取各个维度
+        dimensions = {
+            'event': None,
+            'time': None,
+            'skill': None,
+            'knowledge': None,
+            'preference': None
+        }
+        
+        lines = memory_response.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('事件：'):
+                value = line.replace('事件：', '').strip()
+                if value and value != '无':
+                    dimensions['event'] = value
+            elif line.startswith('时间：'):
+                value = line.replace('时间：', '').strip()
+                if value and value != '无':
+                    dimensions['time'] = value
+            elif line.startswith('技能：'):
+                value = line.replace('技能：', '').strip()
+                if value and value != '无':
+                    dimensions['skill'] = value
+            elif line.startswith('知识：'):
+                value = line.replace('知识：', '').strip()
+                if value and value != '无':
+                    dimensions['knowledge'] = value
+            elif line.startswith('偏好：'):
+                value = line.replace('偏好：', '').strip()
+                if value and value != '无':
+                    dimensions['preference'] = value
+        
+        return dimensions
     
     async def _generate_embedding(self, text: str) -> List[float]:
         """生成文本的embedding"""
@@ -796,99 +885,11 @@ class MemoryManager:
             return []
     
     async def _generate_memory_summary(self, user_id: str, user_messages: List[str], 
-                                     all_conversation: List[Dict], historical_content: List[str]) -> str:
-        """从时间、事件、技能、知识维度生成记忆总结"""
+                                     all_conversation: List[Dict], historical_content: List[str]) -> Dict[str, str]:
+        """从5个维度生成记忆总结，返回结构化数据"""
         try:
-            llm_provider = os.getenv("LLM_PROVIDER", "dashscope")
-            
-            # 构建历史上下文
-            context_text = ""
-            if historical_content:
-                context_text = f"用户 {user_id} 的历史记忆：\n" + "\n".join(historical_content[-10:]) + "\n\n"
-            
-            # 构建完整对话上下文
-            conversation_text = "完整对话记录：\n"
-            for msg in all_conversation:
-                role_label = f"用户{msg['user_id']}" if msg['role'] == 'user' else f"助手{msg['user_id']}"
-                conversation_text += f"{role_label}: {msg['content']}\n"
-            
-            # 用户在本次对话中的发言
-            user_content = f"\n用户 {user_id} 在本次对话中说的话：\n" + "\n".join(user_messages)
-            
-            # 构建提示词
-            prompt = f"""请基于完整对话上下文，为用户 {user_id} 生成记忆总结。
-
-{context_text}{conversation_text}
-{user_content}
-
-请从以下维度进行分析总结：
-1. 时间：相关的时间信息或时间背景
-2. 事件：用户描述或经历的具体事件
-3. 技能：用户展示出的技能、能力或专长
-4. 知识：用户分享的知识、观点或见解
-
-要求：
-- 生成一段200字以内的总结
-- 重点关注有价值的信息
-- 如果本次对话没有值得记忆的内容，请返回空字符串
-- 总结要自然流畅，不要机械地按维度分段
-
-记忆总结："""
-            
-            if llm_provider == "dashscope":
-                from dashscope import Generation
-                
-                response = Generation.call(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    result_format='message'
-                )
-                
-                if response.status_code == 200:
-                    summary = response.output.choices[0]['message']['content'].strip()
-                    # 如果返回空或无意义内容，返回None
-                    if not summary or len(summary) < 10 or "没有值得记忆" in summary:
-                        return None
-                    return summary
-                else:
-                    logger.error(f"LLM记忆总结生成失败: {response}")
-                    return None
-            
-            elif llm_provider == "deepseek":
-                # DeepSeek 记忆总结
-                try:
-                    response = self.llm_client.chat.completions.create(
-                        model=self.llm_model,
-                        messages=[
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=500,
-                        temperature=0.7
-                    )
-                    
-                    if response.choices and len(response.choices) > 0:
-                        summary = response.choices[0].message.content.strip()
-                        # 如果返回空或无意义内容，返回None
-                        if not summary or len(summary) < 10 or "没有值得记忆" in summary:
-                            return None
-                        return summary
-                    else:
-                        logger.error(f"DeepSeek记忆总结生成失败: 没有返回内容")
-                        return None
-                        
-                except Exception as e:
-                    logger.error(f"DeepSeek记忆总结生成异常: {e}")
-                    return None
-            
-            # 其他LLM提供商的实现可以在这里添加
-            else:
-                logger.warning(f"不支持的LLM提供商: {llm_provider}")
-                # 简单的fallback逻辑
-                if user_messages:
-                    return f"用户在会话中的内容: {' '.join(user_messages[:2])}"
-                return None
+            # 直接使用_extract_memory方法进行5维度提取
+            return await self._extract_memory(all_conversation)
                 
         except Exception as e:
             logger.error(f"生成记忆总结失败: {e}")
