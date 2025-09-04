@@ -68,7 +68,7 @@ class MessageItem(BaseModel):
 
 class MemorySearchRequest(BaseModel):
     """搜索记忆请求"""
-    user_id: str = Field(..., description="用户ID")
+    user_id: Optional[str] = Field(default=None, description="用户ID（可选，不传时搜索所有用户）")
     query: str = Field(..., description="搜索查询")
     limit: Optional[int] = Field(default=10, description="返回数量限制")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="过滤条件")
@@ -445,8 +445,8 @@ class MemoryManager:
             logger.error(f"添加记忆失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def search_memory(self, user_id: str, query: str, limit: int = 10, filters: Dict = None) -> List[Dict]:
-        """搜索记忆"""
+    async def search_memory(self, user_id: str = None, query: str = None, limit: int = 10, filters: Dict = None) -> List[Dict]:
+        """搜索记忆 - user_id可选，不传时搜索所有用户的记忆"""
         try:
             # 生成查询的embedding
             query_embedding = await self._generate_embedding(query)
@@ -457,9 +457,13 @@ class MemoryManager:
             # 构建过滤器
             from qdrant_client.models import Filter, FieldCondition, MatchValue
             
-            filter_conditions = [
-                FieldCondition(key="user_id", match=MatchValue(value=user_id))
-            ]
+            filter_conditions = []
+            
+            # 只有当user_id不为空时才添加user_id过滤条件
+            if user_id:
+                filter_conditions.append(
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id))
+                )
             
             if filters:
                 for key, value in filters.items():
@@ -469,13 +473,23 @@ class MemoryManager:
                         )
             
             # 执行搜索
-            search_result = self.vector_db.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                query_filter=Filter(must=filter_conditions),
-                limit=limit,
-                with_payload=True
-            )
+            if filter_conditions:
+                # 有过滤条件时使用过滤器
+                search_result = self.vector_db.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    query_filter=Filter(must=filter_conditions),
+                    limit=limit,
+                    with_payload=True
+                )
+            else:
+                # 没有过滤条件时不使用过滤器
+                search_result = self.vector_db.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    limit=limit,
+                    with_payload=True
+                )
             
             # 格式化结果
             for point in search_result:
