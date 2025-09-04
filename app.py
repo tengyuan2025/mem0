@@ -695,25 +695,27 @@ class MemoryManager:
         conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         
         prompt = f"""
-请从以下对话中提取重要信息作为用户记忆，按以下5个维度分析：
+请从以下对话中为当前用户提取记忆，按以下5个维度分析：
 
-1. 事件：发生了什么具体事情
-2. 时间：相关的时间信息  
-3. 技能：展示的技能或能力
-4. 知识：分享的知识或专业信息
-5. 偏好：表达的喜好或倾向
+1. 事件：当前用户发生了什么具体事情
+2. 时间：与当前用户相关的时间信息  
+3. 技能：当前用户展示的技能或能力
+4. 知识：当前用户分享的知识或专业信息
+5. 偏好：当前用户表达的喜好或倾向
 
-要求：
+重要要求：
+- 只提取当前用户自己说的话中的事实，不要混淆其他用户的行为
+- 如果当前用户只是询问或评论其他用户的行为，请明确区分："用户询问了其他用户关于X的情况"
+- 如果是推测的信息，必须使用"用户可能"或"用户也许"等表述
 - 每个维度最多一句话，简洁准确
 - 没有相关信息的维度输出"无"
-- 不要过度解读或推测
 - 用中文回答
 
-对话：
+对话记录（role=user为当前用户，role=context为其他用户的消息）：
 {conversation}
 
 请按照以下格式输出：
-事件：[事件信息或"无"]
+事件：[当前用户的事件信息或"无"]
 时间：[时间信息或"无"] 
 技能：[技能信息或"无"]
 知识：[知识信息或"无"]
@@ -896,8 +898,24 @@ class MemoryManager:
                                      all_conversation: List[Dict], historical_content: List[str]) -> Dict[str, str]:
         """从5个维度生成记忆总结，返回结构化数据"""
         try:
-            # 直接使用_extract_memory方法进行5维度提取
-            return await self._extract_memory(all_conversation)
+            # 为当前用户创建单独的对话记录用于记忆提取
+            user_specific_conversation = []
+            for msg in all_conversation:
+                if msg["user_id"] == user_id:
+                    # 只包含该用户自己的消息
+                    user_specific_conversation.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+                else:
+                    # 其他用户的消息作为上下文，但标明是其他用户说的
+                    user_specific_conversation.append({
+                        "role": "context",
+                        "content": f"其他用户(ID:{msg['user_id']})说: {msg['content']}"
+                    })
+            
+            # 使用用户特定的对话记录进行记忆提取
+            return await self._extract_memory(user_specific_conversation)
                 
         except Exception as e:
             logger.error(f"生成记忆总结失败: {e}")
