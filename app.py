@@ -147,10 +147,14 @@ class MemoryManager:
             qdrant_host = os.getenv("QDRANT_HOST", "localhost")
             qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
             
+            # 优先使用本地文件存储（持久化）
+            qdrant_path = os.getenv("QDRANT_PATH", "./data/qdrant")
+            
             if qdrant_host == "localhost" and not self._check_qdrant_server():
-                # 使用内存存储
-                self.vector_db = QdrantClient(location=":memory:")
-                logger.info("使用 Qdrant 内存存储")
+                # 使用本地文件存储（持久化）
+                os.makedirs(qdrant_path, exist_ok=True)
+                self.vector_db = QdrantClient(path=qdrant_path)
+                logger.info(f"使用 Qdrant 本地持久化存储: {qdrant_path}")
             else:
                 # 连接到服务器
                 self.vector_db = QdrantClient(

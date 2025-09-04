@@ -138,6 +138,11 @@ case $choice in
         export NO_PROXY=localhost,127.0.0.1,0.0.0.0
         export no_proxy=localhost,127.0.0.1,0.0.0.0
         
+        # 设置HuggingFace镜像（解决国内访问问题）
+        export HF_ENDPOINT=https://hf-mirror.com
+        # 如果模型已下载，可以设置离线模式
+        export HF_HUB_OFFLINE=1
+        
         # 启动服务
         echo ""
         echo "🚀 启动API服务..."
