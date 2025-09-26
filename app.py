@@ -808,10 +808,23 @@ app.add_middleware(
 # 安全认证
 security = HTTPBearer()
 
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """验证API密钥"""
+async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = None):
+    """验证API密钥（可选）"""
+    # 如果没有设置API_SECRET_KEY或设置为空，则跳过验证
+    api_key = os.getenv("API_SECRET_KEY", "").strip()
+    if not api_key:
+        return None
+    
+    # 如果设置了API_SECRET_KEY但没有提供credentials，则报错
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要API密钥"
+        )
+    
+    # 验证token
     token = credentials.credentials
-    if token != os.getenv("API_SECRET_KEY", "your-secret-key-change-this"):
+    if token != api_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无效的API密钥"
@@ -863,8 +876,7 @@ async def add_memory(
             }
         ],
         description="消息数组，包含多个用户的对话内容"
-    ),
-    token: str = Depends(verify_token)
+    )
 ):
     """
     添加记忆 - 接收消息数组，为每个user生成记忆
@@ -878,8 +890,7 @@ async def add_memory(
 
 @app.post("/api/v1/memories/search")
 async def search_memory(
-    request: MemorySearchRequest,
-    token: str = Depends(verify_token)
+    request: MemorySearchRequest
 ):
     """搜索记忆"""
     return await memory_manager.search_memory(
@@ -891,8 +902,7 @@ async def search_memory(
 
 @app.post("/api/v1/memories/update")
 async def update_memory(
-    request: MemoryUpdateRequest,
-    token: str = Depends(verify_token)
+    request: MemoryUpdateRequest
 ):
     """更新记忆"""
     return await memory_manager.update_memory(
@@ -904,8 +914,7 @@ async def update_memory(
 
 @app.post("/api/v1/memories/delete")
 async def delete_memory(
-    request: MemoryDeleteRequest,
-    token: str = Depends(verify_token)
+    request: MemoryDeleteRequest
 ):
     """删除记忆"""
     return await memory_manager.delete_memory(
@@ -915,8 +924,7 @@ async def delete_memory(
 
 @app.post("/api/v1/chat")
 async def chat(
-    request: ChatRequest,
-    token: str = Depends(verify_token)
+    request: ChatRequest
 ):
     """带记忆的聊天"""
     response = await memory_manager.chat_with_memory(
@@ -930,8 +938,7 @@ async def chat(
 @app.get("/api/v1/users/{user_id}/memories")
 async def get_user_memories(
     user_id: str,
-    limit: int = 100,
-    token: str = Depends(verify_token)
+    limit: int = 100
 ):
     """获取用户的所有记忆"""
     memories = await memory_manager.search_memory(
@@ -947,8 +954,7 @@ async def get_mysql_memories(
     user_id: Optional[str] = None,
     session_id: Optional[Union[str, int]] = None,
     limit: int = 100,
-    offset: int = 0,
-    token: str = Depends(verify_token)
+    offset: int = 0
 ):
     """
     从MySQL获取记忆数据
@@ -981,8 +987,7 @@ async def get_mysql_memories(
 
 @app.get("/api/v1/mysql/memories/{memory_id}")
 async def get_mysql_memory(
-    memory_id: str,
-    token: str = Depends(verify_token)
+    memory_id: str
 ):
     """从MySQL获取单个记忆"""
     if os.getenv("ENABLE_MYSQL", "false").lower() != "true":
@@ -1000,8 +1005,7 @@ async def get_mysql_memory(
 async def search_mysql_memories_by_time(
     user_id: str,
     start_time: str,
-    end_time: str,
-    token: str = Depends(verify_token)
+    end_time: str
 ):
     """按时间范围搜索MySQL中的记忆"""
     if os.getenv("ENABLE_MYSQL", "false").lower() != "true":

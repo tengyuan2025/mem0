@@ -42,11 +42,108 @@ case $choice in
             exit 1
         fi
         
-        # 检查Docker服务是否运行
+        # 检查Docker服务是否运行，如果未运行则尝试启动
         if ! docker info &> /dev/null; then
-            echo "❌ Docker 服务未运行"
-            echo "请启动 Docker Desktop 或运行: sudo systemctl start docker"
-            exit 1
+            echo "⚠️  Docker 服务未运行，正在尝试启动..."
+            
+            # 检测操作系统
+            OS_TYPE=$(uname -s)
+            
+            if [ "$OS_TYPE" = "Darwin" ]; then
+                # macOS - 启动Docker Desktop
+                if [ -d "/Applications/Docker.app" ]; then
+                    echo "🔄 正在启动 Docker Desktop..."
+                    open -a Docker
+                    
+                    # 等待Docker启动，最多等待60秒
+                    echo "⏳ 等待 Docker 服务就绪..."
+                    WAIT_TIME=0
+                    MAX_WAIT=60
+                    
+                    while ! docker info &> /dev/null; do
+                        if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+                            echo "❌ Docker 启动超时，请手动启动 Docker Desktop"
+                            exit 1
+                        fi
+                        sleep 2
+                        WAIT_TIME=$((WAIT_TIME + 2))
+                        echo -n "."
+                    done
+                    echo ""
+                    echo "✅ Docker Desktop 已启动"
+                    
+                elif [ -d "$HOME/Applications/Docker.app" ]; then
+                    echo "🔄 正在启动 Docker Desktop..."
+                    open -a "$HOME/Applications/Docker.app"
+                    
+                    # 等待Docker启动
+                    echo "⏳ 等待 Docker 服务就绪..."
+                    WAIT_TIME=0
+                    MAX_WAIT=60
+                    
+                    while ! docker info &> /dev/null; do
+                        if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+                            echo "❌ Docker 启动超时，请手动启动 Docker Desktop"
+                            exit 1
+                        fi
+                        sleep 2
+                        WAIT_TIME=$((WAIT_TIME + 2))
+                        echo -n "."
+                    done
+                    echo ""
+                    echo "✅ Docker Desktop 已启动"
+                    
+                else
+                    echo "❌ 未找到 Docker Desktop，请先安装 Docker Desktop"
+                    echo "下载地址: https://www.docker.com/products/docker-desktop"
+                    exit 1
+                fi
+                
+            elif [ "$OS_TYPE" = "Linux" ]; then
+                # Linux - 尝试使用systemctl启动Docker服务
+                if command -v systemctl &> /dev/null; then
+                    echo "🔄 正在启动 Docker 服务..."
+                    if sudo systemctl start docker 2>/dev/null; then
+                        echo "⏳ 等待 Docker 服务就绪..."
+                        sleep 3
+                        if docker info &> /dev/null; then
+                            echo "✅ Docker 服务已启动"
+                        else
+                            echo "❌ Docker 服务启动失败"
+                            exit 1
+                        fi
+                    else
+                        echo "❌ 无法启动 Docker 服务，请手动运行: sudo systemctl start docker"
+                        exit 1
+                    fi
+                elif command -v service &> /dev/null; then
+                    echo "🔄 正在启动 Docker 服务..."
+                    if sudo service docker start 2>/dev/null; then
+                        echo "⏳ 等待 Docker 服务就绪..."
+                        sleep 3
+                        if docker info &> /dev/null; then
+                            echo "✅ Docker 服务已启动"
+                        else
+                            echo "❌ Docker 服务启动失败"
+                            exit 1
+                        fi
+                    else
+                        echo "❌ 无法启动 Docker 服务，请手动运行: sudo service docker start"
+                        exit 1
+                    fi
+                else
+                    echo "❌ Docker 服务未运行"
+                    echo "请手动启动 Docker 服务"
+                    exit 1
+                fi
+                
+            else
+                echo "❌ Docker 服务未运行"
+                echo "请手动启动 Docker 服务"
+                exit 1
+            fi
+        else
+            echo "✅ Docker 服务运行中"
         fi
         
         if ! command -v docker-compose &> /dev/null; then
@@ -194,6 +291,116 @@ case $choice in
     3)
         echo ""
         echo "🚀 仅启动API服务（Docker）..."
+        
+        # 检查Docker是否安装
+        if ! command -v docker &> /dev/null; then
+            echo "❌ Docker 未安装，请先安装 Docker"
+            exit 1
+        fi
+        
+        # 检查Docker服务是否运行，如果未运行则尝试启动
+        if ! docker info &> /dev/null; then
+            echo "⚠️  Docker 服务未运行，正在尝试启动..."
+            
+            # 检测操作系统
+            OS_TYPE=$(uname -s)
+            
+            if [ "$OS_TYPE" = "Darwin" ]; then
+                # macOS - 启动Docker Desktop
+                if [ -d "/Applications/Docker.app" ]; then
+                    echo "🔄 正在启动 Docker Desktop..."
+                    open -a Docker
+                    
+                    # 等待Docker启动，最多等待60秒
+                    echo "⏳ 等待 Docker 服务就绪..."
+                    WAIT_TIME=0
+                    MAX_WAIT=60
+                    
+                    while ! docker info &> /dev/null; do
+                        if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+                            echo "❌ Docker 启动超时，请手动启动 Docker Desktop"
+                            exit 1
+                        fi
+                        sleep 2
+                        WAIT_TIME=$((WAIT_TIME + 2))
+                        echo -n "."
+                    done
+                    echo ""
+                    echo "✅ Docker Desktop 已启动"
+                    
+                elif [ -d "$HOME/Applications/Docker.app" ]; then
+                    echo "🔄 正在启动 Docker Desktop..."
+                    open -a "$HOME/Applications/Docker.app"
+                    
+                    # 等待Docker启动
+                    echo "⏳ 等待 Docker 服务就绪..."
+                    WAIT_TIME=0
+                    MAX_WAIT=60
+                    
+                    while ! docker info &> /dev/null; do
+                        if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+                            echo "❌ Docker 启动超时，请手动启动 Docker Desktop"
+                            exit 1
+                        fi
+                        sleep 2
+                        WAIT_TIME=$((WAIT_TIME + 2))
+                        echo -n "."
+                    done
+                    echo ""
+                    echo "✅ Docker Desktop 已启动"
+                    
+                else
+                    echo "❌ 未找到 Docker Desktop，请先安装 Docker Desktop"
+                    echo "下载地址: https://www.docker.com/products/docker-desktop"
+                    exit 1
+                fi
+                
+            elif [ "$OS_TYPE" = "Linux" ]; then
+                # Linux - 尝试使用systemctl启动Docker服务
+                if command -v systemctl &> /dev/null; then
+                    echo "🔄 正在启动 Docker 服务..."
+                    if sudo systemctl start docker 2>/dev/null; then
+                        echo "⏳ 等待 Docker 服务就绪..."
+                        sleep 3
+                        if docker info &> /dev/null; then
+                            echo "✅ Docker 服务已启动"
+                        else
+                            echo "❌ Docker 服务启动失败"
+                            exit 1
+                        fi
+                    else
+                        echo "❌ 无法启动 Docker 服务，请手动运行: sudo systemctl start docker"
+                        exit 1
+                    fi
+                elif command -v service &> /dev/null; then
+                    echo "🔄 正在启动 Docker 服务..."
+                    if sudo service docker start 2>/dev/null; then
+                        echo "⏳ 等待 Docker 服务就绪..."
+                        sleep 3
+                        if docker info &> /dev/null; then
+                            echo "✅ Docker 服务已启动"
+                        else
+                            echo "❌ Docker 服务启动失败"
+                            exit 1
+                        fi
+                    else
+                        echo "❌ 无法启动 Docker 服务，请手动运行: sudo service docker start"
+                        exit 1
+                    fi
+                else
+                    echo "❌ Docker 服务未运行"
+                    echo "请手动启动 Docker 服务"
+                    exit 1
+                fi
+                
+            else
+                echo "❌ Docker 服务未运行"
+                echo "请手动启动 Docker 服务"
+                exit 1
+            fi
+        else
+            echo "✅ Docker 服务运行中"
+        fi
         
         # 构建镜像
         echo "📦 构建Docker镜像..."
