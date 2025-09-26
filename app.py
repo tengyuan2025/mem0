@@ -68,7 +68,7 @@ class MessageItem(BaseModel):
 
 class MemorySearchRequest(BaseModel):
     """搜索记忆请求"""
-    user_id: str = Field(..., description="用户ID")
+    user_id: Optional[str] = Field(default=None, description="用户ID（可选，不传时搜索所有用户）")
     query: str = Field(..., description="搜索查询")
     limit: Optional[int] = Field(default=10, description="返回数量限制")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="过滤条件")
@@ -137,52 +137,67 @@ class MemoryManager:
     
     async def _init_vector_db(self):
         """初始化向量数据库"""
-        vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "chroma")
+        vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant")
         
-        if vector_db_type == "chroma":
-            import chromadb
-            from chromadb.config import Settings
-            
-            # 检查是否使用持久化存储
-            if os.getenv("MEM0_VECTOR_STORE_TYPE") == "persistent":
-                persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY", "./data/chroma")
-                os.makedirs(persist_dir, exist_ok=True)
-                self.vector_db = chromadb.PersistentClient(path=persist_dir)
-            else:
-                self.vector_db = chromadb.HttpClient(
-                    host=os.getenv("CHROMA_HOST", "localhost"),
-                    port=int(os.getenv("CHROMA_PORT", 8001))
-                )
-            
-            # 创建或获取集合
-            collection_name = os.getenv("CHROMA_COLLECTION", "mem0_memories")
-            try:
-                self.collection = self.vector_db.get_collection(collection_name)
-            except:
-                self.collection = self.vector_db.create_collection(
-                    name=collection_name,
-                    metadata={"hnsw:space": "cosine"}
-                )
-                
-        elif vector_db_type == "qdrant":
+        if vector_db_type == "qdrant":
             from qdrant_client import QdrantClient
+            from qdrant_client.models import Distance, VectorParams
             
-            self.vector_db = QdrantClient(
-                host=os.getenv("QDRANT_HOST", "localhost"),
-                port=int(os.getenv("QDRANT_PORT", 6333)),
-                api_key=os.getenv("QDRANT_API_KEY")
-            )
+            # 检查是否连接到远程服务器还是使用本地
+            qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+            qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
             
-        elif vector_db_type == "faiss":
-            import faiss
-            import numpy as np
+            # 优先使用本地文件存储（持久化）
+            qdrant_path = os.getenv("QDRANT_PATH", "./data/qdrant")
             
-            # 初始化FAISS索引
-            dimension = 1536  # 默认embedding维度
-            self.vector_db = faiss.IndexFlatL2(dimension)
-            self.faiss_metadata = {}  # 存储元数据
+            if qdrant_host == "localhost" and not self._check_qdrant_server():
+                # 使用本地文件存储（持久化）
+                os.makedirs(qdrant_path, exist_ok=True)
+                self.vector_db = QdrantClient(path=qdrant_path)
+                logger.info(f"使用 Qdrant 本地持久化存储: {qdrant_path}")
+            else:
+                # 连接到服务器
+                self.vector_db = QdrantClient(
+                    host=qdrant_host,
+                    port=qdrant_port
+                )
+                logger.info(f"连接到 Qdrant 服务器: {qdrant_host}:{qdrant_port}")
+            
+            # 集合配置
+            collection_name = os.getenv("QDRANT_COLLECTION", "mem0_memories")
+            dimension = 1024  # bge-large-zh-v1.5 模型维度
+            
+            # 检查集合是否存在
+            try:
+                collection_info = self.vector_db.get_collection(collection_name)
+                logger.info(f"使用现有 Qdrant 集合: {collection_name}")
+            except Exception:
+                # 创建集合
+                self.vector_db.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(size=dimension, distance=Distance.COSINE)
+                )
+                logger.info(f"创建新 Qdrant 集合: {collection_name}")
+            
+            # 存储集合名称
+            self.collection_name = collection_name
+            
+        else:
+            raise ValueError(f"不支持的向量数据库类型: {vector_db_type}")
             
         logger.info(f"向量数据库初始化成功: {vector_db_type}")
+    
+    def _check_qdrant_server(self):
+        """检查Qdrant服务器是否可用"""
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('localhost', 6333))
+            sock.close()
+            return result == 0
+        except:
+            return False
     
     async def _init_llm_client(self):
         """初始化LLM客户端"""
@@ -317,40 +332,77 @@ class MemoryManager:
                     historical_content = await self._get_user_historical_content(user_id)
                     
                     # 生成该用户的记忆总结（传入完整对话上下文）
-                    memory_summary = await self._generate_memory_summary(
+                    memory_dimensions = await self._generate_memory_summary(
                         user_id=user_id,
                         user_messages=contents,
                         all_conversation=all_conversation,
                         historical_content=historical_content
                     )
                     
-                    if not memory_summary:
+                    if not memory_dimensions or not any(memory_dimensions.values()):
+                        logger.info(f"用户 {user_id} 没有需要记忆的内容")
+                        continue
+                    
+                    # 组合所有有效维度形成完整记忆内容
+                    memory_parts = []
+                    if memory_dimensions.get('event'):
+                        memory_parts.append(memory_dimensions['event'])
+                    if memory_dimensions.get('preference'):
+                        memory_parts.append(memory_dimensions['preference'])
+                    if memory_dimensions.get('knowledge'):
+                        memory_parts.append(memory_dimensions['knowledge'])
+                    if memory_dimensions.get('skill'):
+                        memory_parts.append(memory_dimensions['skill'])
+                    if memory_dimensions.get('time'):
+                        memory_parts.append(memory_dimensions['time'])
+                    
+                    memory_content = '，'.join(memory_parts)
+                    
+                    if not memory_content:
                         logger.info(f"用户 {user_id} 没有需要记忆的内容")
                         continue
                     
                     # 生成向量嵌入
-                    embedding = await self._generate_embedding(memory_summary)
+                    embedding = await self._generate_embedding(memory_content)
                     
                     # 生成记忆ID
                     memory_id = hashlib.md5(
-                        f"{user_id}_{memory_summary}_{datetime.utcnow().isoformat()}".encode()
+                        f"{user_id}_{memory_content}_{datetime.utcnow().isoformat()}".encode()
                     ).hexdigest()
                     
-                    # 准备元数据
-                    user_metadata = (metadata or {}).copy()
-                    user_metadata.update({
-                        "user_id": user_id,
-                        "created_at": datetime.utcnow().isoformat(),
-                        "content": memory_summary
-                    })
+                    # 准备元数据 - 存储原始的messages数据
+                    metadata_to_store = {
+                        "original_messages": [
+                            {
+                                "user_id": str(msg.user_id),
+                                "content": msg.content,
+                                "role": msg.role,
+                                "session_id": msg.session_id
+                            } for msg in messages
+                        ]
+                    }
+                    # 如果用户传入了metadata参数，也保存
+                    if metadata:
+                        metadata_to_store.update(metadata)
                     
-                    # 存储到向量数据库
-                    if os.getenv("VECTOR_DB") == "chroma":
-                        self.collection.add(
-                            ids=[memory_id],
-                            embeddings=[embedding],
-                            metadatas=[user_metadata]
-                        )
+                    # 存储到向量数据库 (Qdrant)
+                    from qdrant_client.models import PointStruct
+                    
+                    # 准备插入数据到向量数据库
+                    point = PointStruct(
+                        id=memory_id,
+                        vector=embedding,
+                        payload={
+                            "user_id": user_id,
+                            "content": memory_content,
+                            "created_at": datetime.utcnow().isoformat(),
+                            "session_id": user_session_ids.get(user_id, "")
+                        }
+                    )
+                    self.vector_db.upsert(
+                        collection_name=self.collection_name,
+                        points=[point]
+                    )
                     
                     # 同时存储到MySQL数据库（如果启用）
                     if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
@@ -360,8 +412,13 @@ class MemoryManager:
                             await self.mysql_handler.insert_memory(
                                 memory_id=memory_id,
                                 user_id=user_id,
-                                content=memory_summary,
-                                metadata=user_metadata,
+                                content=memory_content,
+                                event=memory_dimensions.get('event'),
+                                time=memory_dimensions.get('time'),
+                                knowledge=memory_dimensions.get('knowledge'),
+                                skill=memory_dimensions.get('skill'),
+                                preference=memory_dimensions.get('preference'),
+                                metadata=metadata_to_store,
                                 session_id=session_id
                             )
                             logger.info(f"用户 {user_id} 记忆已同步到MySQL: {memory_id}")
@@ -372,7 +429,7 @@ class MemoryManager:
                         "user_id": user_id,
                         "memory_id": memory_id,
                         "status": "success",
-                        "content": memory_summary,
+                        "content": memory_content,
                         "session_id": user_session_ids.get(user_id)
                     })
                     
@@ -392,35 +449,64 @@ class MemoryManager:
             logger.error(f"添加记忆失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def search_memory(self, user_id: str, query: str, limit: int = 10, filters: Dict = None) -> List[Dict]:
-        """搜索记忆"""
+    async def search_memory(self, user_id: str = None, query: str = None, limit: int = 10, filters: Dict = None) -> List[Dict]:
+        """搜索记忆 - user_id可选，不传时搜索所有用户的记忆"""
         try:
             # 生成查询的embedding
             query_embedding = await self._generate_embedding(query)
             
-            # 从向量数据库搜索
-            if os.getenv("VECTOR_DB") == "chroma":
-                # 构建查询条件
-                where = {"user_id": user_id}
-                if filters:
-                    where.update(filters)
-                
-                results = self.collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=limit,
-                    where=where
+            # 从向量数据库搜索 (Qdrant)
+            memories = []
+            
+            # 构建过滤器
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            filter_conditions = []
+            
+            # 只有当user_id不为空时才添加user_id过滤条件
+            if user_id:
+                filter_conditions.append(
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id))
                 )
-                
-                # 格式化结果
-                memories = []
-                if results["metadatas"]:
-                    for i, metadata in enumerate(results["metadatas"][0]):
-                        memories.append({
-                            "memory_id": results["ids"][0][i],
-                            "content": metadata.get("content", ""),
-                            "score": 1 - results["distances"][0][i] if results["distances"] else 0,
-                            "metadata": metadata
-                        })
+            
+            if filters:
+                for key, value in filters.items():
+                    if key != "user_id":
+                        filter_conditions.append(
+                            FieldCondition(key=key, match=MatchValue(value=value))
+                        )
+            
+            # 执行搜索
+            if filter_conditions:
+                # 有过滤条件时使用过滤器
+                search_result = self.vector_db.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    query_filter=Filter(must=filter_conditions),
+                    limit=limit,
+                    with_payload=True
+                )
+            else:
+                # 没有过滤条件时不使用过滤器
+                search_result = self.vector_db.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    limit=limit,
+                    with_payload=True
+                )
+            
+            # 格式化结果
+            for point in search_result:
+                memories.append({
+                    "memory_id": point.id,
+                    "content": point.payload.get("content", ""),
+                    "score": point.score,
+                    "metadata": {
+                        "user_id": point.payload.get("user_id", ""),
+                        "created_at": point.payload.get("created_at", ""),
+                        "session_id": point.payload.get("session_id", "")
+                    }
+                })
             
             logger.info(f"搜索记忆成功，找到 {len(memories)} 条记录")
             
@@ -486,7 +572,8 @@ class MemoryManager:
     async def delete_memory(self, memory_id: str = None, user_id: str = None) -> Dict:
         """删除记忆"""
         try:
-            if os.getenv("VECTOR_DB") == "chroma":
+            vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "chroma")
+            if vector_db_type == "chroma":
                 if memory_id:
                     # 删除特定记忆
                     self.collection.delete(ids=[memory_id])
@@ -494,6 +581,25 @@ class MemoryManager:
                 elif user_id:
                     # 删除用户的所有记忆
                     self.collection.delete(where={"user_id": user_id})
+                    logger.info(f"用户 {user_id} 的所有记忆删除成功")
+                else:
+                    raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
+            elif vector_db_type == "milvus":
+                if memory_id:
+                    # 删除特定记忆
+                    delete_expr = f'id == "{memory_id}"'
+                    self.vector_db.delete(
+                        collection_name=self.collection_name,
+                        filter=delete_expr
+                    )
+                    logger.info(f"记忆删除成功: {memory_id}")
+                elif user_id:
+                    # 删除用户的所有记忆
+                    delete_expr = f'user_id == "{user_id}"'
+                    self.vector_db.delete(
+                        collection_name=self.collection_name,
+                        filter=delete_expr
+                    )
                     logger.info(f"用户 {user_id} 的所有记忆删除成功")
                 else:
                     raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
@@ -515,26 +621,144 @@ class MemoryManager:
             logger.error(f"删除记忆失败: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
-    async def _extract_memory(self, messages: List[Dict]) -> str:
-        """从对话中提取记忆"""
+    async def clear_all_data(self) -> Dict:
+        """清除所有数据（向量数据库和MySQL）"""
+        try:
+            results = {
+                "vector_db": {"status": "skipped"},
+                "mysql": {"status": "skipped"}
+            }
+            
+            # 清除向量数据库 (Qdrant)
+            try:
+                collection_name = self.collection_name
+                
+                # 获取数据数量（用于统计）
+                collection_info = self.vector_db.get_collection(collection_name)
+                count_before = collection_info.points_count if collection_info else 0
+                
+                if count_before > 0:
+                    # 删除集合中的所有数据
+                    self.vector_db.delete_collection(collection_name)
+                    
+                    # 重新创建集合
+                    from qdrant_client.models import Distance, VectorParams
+                    self.vector_db.create_collection(
+                        collection_name=collection_name,
+                        vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
+                    )
+                    
+                    logger.info(f"Qdrant 向量数据库清除成功: 删除了 {count_before} 条记录")
+                    results["vector_db"] = {
+                        "status": "success",
+                        "deleted_count": count_before
+                    }
+                else:
+                    logger.info("向量数据库已为空")
+                    results["vector_db"] = {
+                        "status": "success",
+                        "deleted_count": 0
+                    }
+            except Exception as e:
+                logger.error(f"清除向量数据库失败: {e}")
+                results["vector_db"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # 清除MySQL数据库
+            if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
+                try:
+                    # 清除MySQL中的所有记忆
+                    deleted_count = await self.mysql_handler.clear_all_memories()
+                    logger.info(f"MySQL数据库清除成功: 删除了 {deleted_count} 条记录")
+                    results["mysql"] = {
+                        "status": "success",
+                        "deleted_count": deleted_count
+                    }
+                except Exception as e:
+                    logger.error(f"清除MySQL数据库失败: {e}")
+                    results["mysql"] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"清除所有数据失败: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def _extract_memory(self, messages: List[Dict]) -> Dict[str, str]:
+        """从对话中提取记忆，返回5个维度的结构化信息"""
         # 构建提取记忆的prompt
         conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         
         prompt = f"""
-        请从以下对话中提取重要的信息作为长期记忆。
-        只提取关键信息，如用户偏好、重要事实、个人信息等。
-        如果没有值得记忆的内容，返回空字符串。
-        
-        对话：
-        {conversation}
-        
-        提取的记忆（中文）：
+请从以下对话中为当前用户提取记忆，按以下5个维度分析：
+
+1. 事件：当前用户发生了什么具体事情
+2. 时间：与当前用户相关的时间信息  
+3. 技能：当前用户展示的技能或能力
+4. 知识：当前用户分享的知识或专业信息
+5. 偏好：当前用户表达的喜好或倾向
+
+重要要求：
+- 只提取当前用户自己说的话中的事实，不要混淆其他用户的行为
+- 如果当前用户只是询问或评论其他用户的行为，请明确区分："用户询问了其他用户关于X的情况"
+- 如果是推测的信息，必须使用"用户可能"或"用户也许"等表述
+- 每个维度最多一句话，简洁准确
+- 没有相关信息的维度输出"无"
+- 用中文回答
+
+对话记录（role=user为当前用户，role=context为其他用户的消息）：
+{conversation}
+
+请按照以下格式输出：
+事件：[当前用户的事件信息或"无"]
+时间：[时间信息或"无"] 
+技能：[技能信息或"无"]
+知识：[知识信息或"无"]
+偏好：[偏好信息或"无"]
         """
         
         # 调用LLM提取记忆
-        memory = await self._call_llm(prompt)
+        memory_response = await self._call_llm(prompt)
         
-        return memory.strip()
+        # 解析LLM响应，提取各个维度
+        dimensions = {
+            'event': None,
+            'time': None,
+            'skill': None,
+            'knowledge': None,
+            'preference': None
+        }
+        
+        lines = memory_response.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('事件：'):
+                value = line.replace('事件：', '').strip()
+                if value and value != '无':
+                    dimensions['event'] = value
+            elif line.startswith('时间：'):
+                value = line.replace('时间：', '').strip()
+                if value and value != '无':
+                    dimensions['time'] = value
+            elif line.startswith('技能：'):
+                value = line.replace('技能：', '').strip()
+                if value and value != '无':
+                    dimensions['skill'] = value
+            elif line.startswith('知识：'):
+                value = line.replace('知识：', '').strip()
+                if value and value != '无':
+                    dimensions['knowledge'] = value
+            elif line.startswith('偏好：'):
+                value = line.replace('偏好：', '').strip()
+                if value and value != '无':
+                    dimensions['preference'] = value
+        
+        return dimensions
     
     async def _generate_embedding(self, text: str) -> List[float]:
         """生成文本的embedding"""
@@ -671,99 +895,27 @@ class MemoryManager:
             return []
     
     async def _generate_memory_summary(self, user_id: str, user_messages: List[str], 
-                                     all_conversation: List[Dict], historical_content: List[str]) -> str:
-        """从时间、事件、技能、知识维度生成记忆总结"""
+                                     all_conversation: List[Dict], historical_content: List[str]) -> Dict[str, str]:
+        """从5个维度生成记忆总结，返回结构化数据"""
         try:
-            llm_provider = os.getenv("LLM_PROVIDER", "dashscope")
-            
-            # 构建历史上下文
-            context_text = ""
-            if historical_content:
-                context_text = f"用户 {user_id} 的历史记忆：\n" + "\n".join(historical_content[-10:]) + "\n\n"
-            
-            # 构建完整对话上下文
-            conversation_text = "完整对话记录：\n"
+            # 为当前用户创建单独的对话记录用于记忆提取
+            user_specific_conversation = []
             for msg in all_conversation:
-                role_label = f"用户{msg['user_id']}" if msg['role'] == 'user' else f"助手{msg['user_id']}"
-                conversation_text += f"{role_label}: {msg['content']}\n"
-            
-            # 用户在本次对话中的发言
-            user_content = f"\n用户 {user_id} 在本次对话中说的话：\n" + "\n".join(user_messages)
-            
-            # 构建提示词
-            prompt = f"""请基于完整对话上下文，为用户 {user_id} 生成记忆总结。
-
-{context_text}{conversation_text}
-{user_content}
-
-请从以下维度进行分析总结：
-1. 时间：相关的时间信息或时间背景
-2. 事件：用户描述或经历的具体事件
-3. 技能：用户展示出的技能、能力或专长
-4. 知识：用户分享的知识、观点或见解
-
-要求：
-- 生成一段200字以内的总结
-- 重点关注有价值的信息
-- 如果本次对话没有值得记忆的内容，请返回空字符串
-- 总结要自然流畅，不要机械地按维度分段
-
-记忆总结："""
-            
-            if llm_provider == "dashscope":
-                from dashscope import Generation
-                
-                response = Generation.call(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    result_format='message'
-                )
-                
-                if response.status_code == 200:
-                    summary = response.output.choices[0]['message']['content'].strip()
-                    # 如果返回空或无意义内容，返回None
-                    if not summary or len(summary) < 10 or "没有值得记忆" in summary:
-                        return None
-                    return summary
+                if msg["user_id"] == user_id:
+                    # 只包含该用户自己的消息
+                    user_specific_conversation.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
                 else:
-                    logger.error(f"LLM记忆总结生成失败: {response}")
-                    return None
+                    # 其他用户的消息作为上下文，但标明是其他用户说的
+                    user_specific_conversation.append({
+                        "role": "context",
+                        "content": f"其他用户(ID:{msg['user_id']})说: {msg['content']}"
+                    })
             
-            elif llm_provider == "deepseek":
-                # DeepSeek 记忆总结
-                try:
-                    response = self.llm_client.chat.completions.create(
-                        model=self.llm_model,
-                        messages=[
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=500,
-                        temperature=0.7
-                    )
-                    
-                    if response.choices and len(response.choices) > 0:
-                        summary = response.choices[0].message.content.strip()
-                        # 如果返回空或无意义内容，返回None
-                        if not summary or len(summary) < 10 or "没有值得记忆" in summary:
-                            return None
-                        return summary
-                    else:
-                        logger.error(f"DeepSeek记忆总结生成失败: 没有返回内容")
-                        return None
-                        
-                except Exception as e:
-                    logger.error(f"DeepSeek记忆总结生成异常: {e}")
-                    return None
-            
-            # 其他LLM提供商的实现可以在这里添加
-            else:
-                logger.warning(f"不支持的LLM提供商: {llm_provider}")
-                # 简单的fallback逻辑
-                if user_messages:
-                    return f"用户在会话中的内容: {' '.join(user_messages[:2])}"
-                return None
+            # 使用用户特定的对话记录进行记忆提取
+            return await self._extract_memory(user_specific_conversation)
                 
         except Exception as e:
             logger.error(f"生成记忆总结失败: {e}")
@@ -843,7 +995,7 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "llm_provider": os.getenv("LLM_PROVIDER", "dashscope"),
-        "vector_db": os.getenv("VECTOR_DB", "chroma")
+        "vector_db": os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant")
     }
 
 @app.get("/health")
@@ -1024,6 +1176,31 @@ async def search_mysql_memories_by_time(
         raise HTTPException(status_code=400, detail="时间格式错误，请使用ISO格式如：2023-01-01T00:00:00")
     except Exception as e:
         logger.error(f"按时间搜索MySQL记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/v1/memories/clear-all")
+async def clear_all_data(
+    token: str = Depends(verify_token)
+):
+    """清除所有数据（向量数据库和MySQL）- 危险操作"""
+    logger.warning("收到清除所有数据的请求")
+    
+    try:
+        results = await memory_manager.clear_all_data()
+        
+        # 记录操作结果
+        if results["vector_db"]["status"] == "success":
+            logger.info(f"向量数据库清除成功: {results['vector_db']['deleted_count']} 条记录")
+        if results["mysql"]["status"] == "success":
+            logger.info(f"MySQL数据库清除成功: {results['mysql']['deleted_count']} 条记录")
+            
+        return {
+            "status": "success",
+            "message": "所有数据已清除",
+            "details": results
+        }
+    except Exception as e:
+        logger.error(f"清除所有数据失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

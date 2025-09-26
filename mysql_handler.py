@@ -106,6 +106,11 @@ class MySQLHandler:
                         session_id BIGINT COMMENT '会话id',
                         user_id VARCHAR(255) NOT NULL COMMENT '用户id',
                         content TEXT COMMENT '记忆内容总结',
+                        event TEXT COMMENT '事件信息',
+                        time VARCHAR(255) COMMENT '时间信息',
+                        knowledge TEXT COMMENT '知识信息',
+                        skill TEXT COMMENT '技能信息',
+                        preference TEXT COMMENT '偏好信息',
                         metadata JSON COMMENT '元数据',
                         embedding_provider VARCHAR(100) COMMENT 'Embedding提供者',
                         llm_provider VARCHAR(100) COMMENT 'LLM提供者',
@@ -128,6 +133,11 @@ class MySQLHandler:
                           memory_id: str,
                           user_id: str,
                           content: str,
+                          event: Optional[str] = None,
+                          time: Optional[str] = None,
+                          knowledge: Optional[str] = None,
+                          skill: Optional[str] = None,
+                          preference: Optional[str] = None,
                           metadata: Optional[Dict[str, Any]] = None,
                           session_id: Optional[int] = None) -> int:
         """插入记忆到MySQL"""
@@ -142,17 +152,17 @@ class MySQLHandler:
                     # 插入数据
                     insert_sql = """
                     INSERT INTO memory (
-                        memory_id, user_id, content, metadata, session_id,
-                        embedding_provider, llm_provider, created_at, updated_at
+                        memory_id, user_id, content, event, time, knowledge, skill, preference,
+                        metadata, session_id, embedding_provider, llm_provider, created_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """
                     
                     now = datetime.now()
                     values = (
-                        memory_id, user_id, content, metadata_json, session_id,
-                        embedding_provider, llm_provider, now, now
+                        memory_id, user_id, content, event, time, knowledge, skill, preference,
+                        metadata_json, session_id, embedding_provider, llm_provider, now, now
                     )
                     
                     await cursor.execute(insert_sql, values)
@@ -170,6 +180,11 @@ class MySQLHandler:
     async def update_memory(self, 
                           memory_id: str,
                           content: Optional[str] = None,
+                          event: Optional[str] = None,
+                          time: Optional[str] = None,
+                          knowledge: Optional[str] = None,
+                          skill: Optional[str] = None,
+                          preference: Optional[str] = None,
                           metadata: Optional[Dict[str, Any]] = None,
                           session_id: Optional[int] = None) -> bool:
         """更新MySQL中的记忆"""
@@ -183,6 +198,26 @@ class MySQLHandler:
                     if content is not None:
                         update_parts.append("content = %s")
                         values.append(content)
+                    
+                    if event is not None:
+                        update_parts.append("event = %s")
+                        values.append(event)
+                        
+                    if time is not None:
+                        update_parts.append("time = %s")
+                        values.append(time)
+                        
+                    if knowledge is not None:
+                        update_parts.append("knowledge = %s")
+                        values.append(knowledge)
+                        
+                    if skill is not None:
+                        update_parts.append("skill = %s")
+                        values.append(skill)
+                        
+                    if preference is not None:
+                        update_parts.append("preference = %s")
+                        values.append(preference)
                     
                     if metadata is not None:
                         update_parts.append("metadata = %s")
@@ -241,6 +276,24 @@ class MySQLHandler:
                     
         except Exception as e:
             logger.error(f"从MySQL删除记忆失败: {e}")
+            raise
+    
+    async def clear_all_memories(self) -> int:
+        """清除MySQL中的所有记忆数据"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    # 删除所有记忆
+                    delete_sql = "DELETE FROM memory"
+                    await cursor.execute(delete_sql)
+                    
+                    affected_rows = cursor.rowcount
+                    
+                    logger.info(f"MySQL所有记忆清除完成, 删除记录数: {affected_rows}")
+                    return affected_rows
+                    
+        except Exception as e:
+            logger.error(f"清除MySQL所有记忆失败: {e}")
             raise
     
     async def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
