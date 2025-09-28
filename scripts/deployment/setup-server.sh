@@ -139,26 +139,47 @@ configure_ssh() {
     log "配置SSH安全..."
     
     # 备份原始配置
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+    if [ ! -f /etc/ssh/sshd_config.backup ]; then
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+    fi
     
-    # 配置SSH
-    cat > /etc/ssh/sshd_config.d/99-mem0.conf << 'EOF'
+    # 检查系统是否支持sshd_config.d目录
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        log "使用 sshd_config.d 目录配置SSH"
+        cat > /etc/ssh/sshd_config.d/99-mem0.conf << 'EOF'
 # Mem0 SSH安全配置
 Protocol 2
-PermitRootLogin no
 PasswordAuthentication no
 ChallengeResponseAuthentication no
 UsePAM yes
 X11Forwarding no
-PrintMotd no
-AcceptEnv LANG LC_*
-Subsystem sftp /usr/lib/openssh/sftp-server
 MaxAuthTries 3
 ClientAliveInterval 600
 ClientAliveCountMax 3
 EOF
+    else
+        log "直接修改 sshd_config 文件"
+        # 直接在主配置文件中添加安全配置
+        if ! grep -q "# Mem0 SSH Config" /etc/ssh/sshd_config; then
+            cat >> /etc/ssh/sshd_config << 'EOF'
 
-    systemctl restart sshd
+# Mem0 SSH Config
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+MaxAuthTries 3
+ClientAliveInterval 600
+ClientAliveCountMax 3
+EOF
+        fi
+    fi
+    
+    # 验证配置文件语法
+    if sshd -t; then
+        log "SSH配置验证成功"
+        systemctl restart sshd || log "SSH服务重启失败，但继续安装"
+    else
+        warn "SSH配置验证失败，跳过SSH重启"
+    fi
 }
 
 # 创建部署用户
