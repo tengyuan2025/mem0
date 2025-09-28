@@ -57,13 +57,34 @@ detect_os() {
             log "检测到 Ubuntu $VER"
             PACKAGE_MANAGER="apt"
             ;;
-        centos|rhel)
+        centos|rhel|anolis)
             log "检测到 CentOS/RHEL $VER"
             PACKAGE_MANAGER="yum"
             ;;
+        alinux|alios|alibaba)
+            log "检测到 Alibaba Cloud Linux $VER"
+            PACKAGE_MANAGER="yum"
+            ;;
+        rocky|almalinux)
+            log "检测到 Rocky/AlmaLinux $VER"
+            PACKAGE_MANAGER="yum"
+            ;;
+        fedora)
+            log "检测到 Fedora $VER"
+            PACKAGE_MANAGER="dnf"
+            ;;
         *)
-            error "不支持的操作系统: $OS"
-            exit 1
+            # 尝试检测包管理器
+            if command -v yum &> /dev/null; then
+                warn "未识别的系统 $OS，但检测到yum，尝试以CentOS方式处理"
+                PACKAGE_MANAGER="yum"
+            elif command -v apt-get &> /dev/null; then
+                warn "未识别的系统 $OS，但检测到apt，尝试以Ubuntu方式处理"
+                PACKAGE_MANAGER="apt"
+            else
+                error "不支持的操作系统: $OS"
+                exit 1
+            fi
             ;;
     esac
 }
