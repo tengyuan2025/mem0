@@ -181,6 +181,43 @@ class MemoryManager:
             
             # 存储集合名称
             self.collection_name = collection_name
+            self.vector_db_type = "qdrant"
+            
+        elif vector_db_type == "chroma":
+            import chromadb
+            from chromadb.config import Settings
+            
+            # ChromaDB 配置
+            persist_directory = os.getenv("CHROMA_PERSIST_DIRECTORY", "./data/chroma")
+            os.makedirs(persist_directory, exist_ok=True)
+            
+            # 创建 ChromaDB 客户端（持久化模式）
+            self.vector_db = chromadb.PersistentClient(
+                path=persist_directory,
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
+            )
+            logger.info(f"使用 ChromaDB 本地持久化存储: {persist_directory}")
+            
+            # 集合配置
+            collection_name = os.getenv("CHROMA_COLLECTION", "mem0_memories")
+            
+            # 获取或创建集合
+            try:
+                self.collection = self.vector_db.get_or_create_collection(
+                    name=collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
+                logger.info(f"使用 ChromaDB 集合: {collection_name}")
+            except Exception as e:
+                logger.error(f"创建 ChromaDB 集合失败: {e}")
+                raise
+            
+            # 存储集合名称
+            self.collection_name = collection_name
+            self.vector_db_type = "chroma"
             
         else:
             raise ValueError(f"不支持的向量数据库类型: {vector_db_type}")
@@ -201,7 +238,7 @@ class MemoryManager:
     
     async def _init_llm_client(self):
         """初始化LLM客户端"""
-        llm_provider = os.getenv("LLM_PROVIDER", "dashscope")
+        llm_provider = os.getenv("MEM0_LLM_PROVIDER", os.getenv("LLM_PROVIDER", "dashscope"))
         
         if llm_provider == "dashscope":
             # 阿里云通义千问
@@ -241,11 +278,20 @@ class MemoryManager:
             )
             self.llm_model = os.getenv("MOONSHOT_MODEL", "moonshot-v1-8k")
             
+        elif llm_provider == "doubao":
+            # 豆包/火山引擎 API
+            from openai import OpenAI
+            self.llm_client = OpenAI(
+                api_key=os.getenv("DOUBAO_API_KEY", os.getenv("ARK_API_KEY")),
+                base_url=os.getenv("DOUBAO_API_BASE", "https://ark.cn-beijing.volces.com/api/v3")
+            )
+            self.llm_model = os.getenv("MEM0_LLM_MODEL", "doubao-pro-32k")
+            
         logger.info(f"LLM客户端初始化成功: {llm_provider}")
     
     async def _init_embedding_client(self):
         """初始化Embedding客户端"""
-        embedding_provider = os.getenv("EMBEDDING_PROVIDER", "dashscope")
+        embedding_provider = os.getenv("MEM0_EMBEDDER_PROVIDER", os.getenv("EMBEDDING_PROVIDER", "dashscope"))
         logger.info(f"开始初始化Embedding客户端: {embedding_provider}")
         
         if embedding_provider == "dashscope":
@@ -266,10 +312,10 @@ class MemoryManager:
             self.embedding_client = ZhipuAI(api_key=os.getenv("ZHIPUAI_API_KEY"))
             self.embedding_model = os.getenv("ZHIPUAI_EMBEDDING_MODEL", "embedding-3")
             
-        elif embedding_provider == "local_huggingface":
+        elif embedding_provider == "local_huggingface" or embedding_provider == "huggingface":
             # HuggingFace 本地模型
             from sentence_transformers import SentenceTransformer
-            self.embedding_model = os.getenv("HF_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+            self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", os.getenv("HF_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"))
             self.embedding_client = SentenceTransformer(self.embedding_model)
             
         elif embedding_provider == "sentence_transformers":
@@ -277,6 +323,14 @@ class MemoryManager:
             from sentence_transformers import SentenceTransformer
             self.embedding_model = os.getenv("ST_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
             self.embedding_client = SentenceTransformer(self.embedding_model)
+            
+        elif embedding_provider == "openai":
+            # OpenAI Embedding
+            from openai import OpenAI
+            self.embedding_client = OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
             
         elif embedding_provider == "local_openai":
             # 本地OpenAI兼容API (如Ollama)
@@ -385,24 +439,38 @@ class MemoryManager:
                     if metadata:
                         metadata_to_store.update(metadata)
                     
-                    # 存储到向量数据库 (Qdrant)
-                    from qdrant_client.models import PointStruct
-                    
-                    # 准备插入数据到向量数据库
-                    point = PointStruct(
-                        id=memory_id,
-                        vector=embedding,
-                        payload={
-                            "user_id": user_id,
-                            "content": memory_content,
-                            "created_at": datetime.utcnow().isoformat(),
-                            "session_id": user_session_ids.get(user_id, "")
-                        }
-                    )
-                    self.vector_db.upsert(
-                        collection_name=self.collection_name,
-                        points=[point]
-                    )
+                    # 存储到向量数据库
+                    if hasattr(self, 'vector_db_type') and self.vector_db_type == "chroma":
+                        # ChromaDB 存储
+                        self.collection.add(
+                            ids=[memory_id],
+                            embeddings=[embedding],
+                            metadatas=[{
+                                "user_id": user_id,
+                                "content": memory_content,
+                                "created_at": datetime.utcnow().isoformat(),
+                                "session_id": user_session_ids.get(user_id, "")
+                            }],
+                            documents=[memory_content]
+                        )
+                    else:
+                        # Qdrant 存储
+                        from qdrant_client.models import PointStruct
+                        
+                        point = PointStruct(
+                            id=memory_id,
+                            vector=embedding,
+                            payload={
+                                "user_id": user_id,
+                                "content": memory_content,
+                                "created_at": datetime.utcnow().isoformat(),
+                                "session_id": user_session_ids.get(user_id, "")
+                            }
+                        )
+                        self.vector_db.upsert(
+                            collection_name=self.collection_name,
+                            points=[point]
+                        )
                     
                     # 同时存储到MySQL数据库（如果启用）
                     if os.getenv("ENABLE_MYSQL", "false").lower() == "true":
@@ -455,11 +523,34 @@ class MemoryManager:
             # 生成查询的embedding
             query_embedding = await self._generate_embedding(query)
             
-            # 从向量数据库搜索 (Qdrant)
+            # 从向量数据库搜索
             memories = []
             
-            # 构建过滤器
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            if hasattr(self, 'vector_db_type') and self.vector_db_type == "chroma":
+                # ChromaDB 搜索
+                where_clause = {}
+                if user_id:
+                    where_clause["user_id"] = user_id
+                
+                results = self.collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=limit,
+                    where=where_clause if where_clause else None
+                )
+                
+                if results and results['ids'] and len(results['ids'][0]) > 0:
+                    for i in range(len(results['ids'][0])):
+                        memories.append({
+                            "id": results['ids'][0][i],
+                            "content": results['metadatas'][0][i].get('content', ''),
+                            "user_id": results['metadatas'][0][i].get('user_id', ''),
+                            "created_at": results['metadatas'][0][i].get('created_at', ''),
+                            "session_id": results['metadatas'][0][i].get('session_id', ''),
+                            "score": 1 - results['distances'][0][i] if results['distances'] else 0
+                        })
+            else:
+                # Qdrant 搜索
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
             
             filter_conditions = []
             
@@ -525,7 +616,8 @@ class MemoryManager:
             if content:
                 embedding = await self._generate_embedding(content)
                 
-                if os.getenv("VECTOR_DB") == "chroma":
+                vector_db_type = getattr(self, 'vector_db_type', os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant"))
+                if vector_db_type == "chroma":
                     # 获取原有的元数据
                     result = self.collection.get(ids=[memory_id])
                     if not result["ids"]:
@@ -546,6 +638,36 @@ class MemoryManager:
                         ids=[memory_id],
                         embeddings=[embedding],
                         metadatas=[new_metadata]
+                    )
+                elif vector_db_type == "qdrant":
+                    from qdrant_client.models import PointStruct
+                    
+                    # 获取原有的点数据
+                    search_result = self.vector_db.retrieve(
+                        collection_name=self.collection_name,
+                        ids=[memory_id]
+                    )
+                    
+                    if not search_result:
+                        raise HTTPException(status_code=404, detail="记忆不存在")
+                    
+                    old_payload = search_result[0].payload
+                    
+                    # 更新payload
+                    new_payload = old_payload.copy()
+                    new_payload["content"] = content
+                    new_payload["updated_at"] = datetime.utcnow().isoformat()
+                    if metadata:
+                        new_payload.update(metadata)
+                    
+                    # 更新点
+                    self.vector_db.upsert(
+                        collection_name=self.collection_name,
+                        points=[PointStruct(
+                            id=memory_id,
+                            vector=embedding,
+                            payload=new_payload
+                        )]
                     )
             
             # 同时更新MySQL数据库（如果启用）
@@ -572,7 +694,7 @@ class MemoryManager:
     async def delete_memory(self, memory_id: str = None, user_id: str = None) -> Dict:
         """删除记忆"""
         try:
-            vector_db_type = os.getenv("MEM0_VECTOR_STORE_PROVIDER", "chroma")
+            vector_db_type = getattr(self, 'vector_db_type', os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant"))
             if vector_db_type == "chroma":
                 if memory_id:
                     # 删除特定记忆
@@ -581,6 +703,26 @@ class MemoryManager:
                 elif user_id:
                     # 删除用户的所有记忆
                     self.collection.delete(where={"user_id": user_id})
+                    logger.info(f"用户 {user_id} 的所有记忆删除成功")
+                else:
+                    raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
+            elif vector_db_type == "qdrant":
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
+                if memory_id:
+                    # 删除特定记忆
+                    self.vector_db.delete(
+                        collection_name=self.collection_name,
+                        points_selector=[memory_id]
+                    )
+                    logger.info(f"记忆删除成功: {memory_id}")
+                elif user_id:
+                    # 删除用户的所有记忆
+                    self.vector_db.delete(
+                        collection_name=self.collection_name,
+                        points_selector=Filter(
+                            must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+                        )
+                    )
                     logger.info(f"用户 {user_id} 的所有记忆删除成功")
                 else:
                     raise HTTPException(status_code=400, detail="必须提供 memory_id 或 user_id")
@@ -629,35 +771,48 @@ class MemoryManager:
                 "mysql": {"status": "skipped"}
             }
             
-            # 清除向量数据库 (Qdrant)
+            # 清除向量数据库
             try:
+                vector_db_type = getattr(self, 'vector_db_type', os.getenv("MEM0_VECTOR_STORE_PROVIDER", "qdrant"))
                 collection_name = self.collection_name
                 
-                # 获取数据数量（用于统计）
-                collection_info = self.vector_db.get_collection(collection_name)
-                count_before = collection_info.points_count if collection_info else 0
-                
-                if count_before > 0:
-                    # 删除集合中的所有数据
-                    self.vector_db.delete_collection(collection_name)
+                if vector_db_type == "chroma":
+                    # ChromaDB 清除
+                    # 获取所有数据进行计数
+                    all_data = self.collection.get()
+                    count_before = len(all_data["ids"]) if all_data["ids"] else 0
                     
-                    # 重新创建集合
-                    from qdrant_client.models import Distance, VectorParams
-                    self.vector_db.create_collection(
-                        collection_name=collection_name,
-                        vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
-                    )
+                    if count_before > 0:
+                        # 删除所有数据
+                        self.collection.delete(ids=all_data["ids"])
+                    
+                    logger.info(f"ChromaDB 向量数据库清除成功: 删除了 {count_before} 条记录")
+                    results["vector_db"] = {
+                        "status": "success",
+                        "deleted_count": count_before
+                    }
+                elif vector_db_type == "qdrant":
+                    # Qdrant 清除
+                    # 获取数据数量（用于统计）
+                    collection_info = self.vector_db.get_collection(collection_name)
+                    count_before = collection_info.points_count if collection_info else 0
+                    
+                    if count_before > 0:
+                        # 删除集合中的所有数据
+                        self.vector_db.delete_collection(collection_name)
+                        
+                        # 重新创建集合
+                        from qdrant_client.models import Distance, VectorParams
+                        self.vector_db.create_collection(
+                            collection_name=collection_name,
+                            vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
+                        )
+                    
                     
                     logger.info(f"Qdrant 向量数据库清除成功: 删除了 {count_before} 条记录")
                     results["vector_db"] = {
                         "status": "success",
                         "deleted_count": count_before
-                    }
-                else:
-                    logger.info("向量数据库已为空")
-                    results["vector_db"] = {
-                        "status": "success",
-                        "deleted_count": 0
                     }
             except Exception as e:
                 logger.error(f"清除向量数据库失败: {e}")
@@ -762,7 +917,7 @@ class MemoryManager:
     
     async def _generate_embedding(self, text: str) -> List[float]:
         """生成文本的embedding"""
-        provider = os.getenv("EMBEDDING_PROVIDER", "dashscope")
+        provider = os.getenv("MEM0_EMBEDDER_PROVIDER", os.getenv("EMBEDDING_PROVIDER", "dashscope"))
         
         if provider == "dashscope":
             from dashscope import TextEmbedding
@@ -791,10 +946,18 @@ class MemoryManager:
             )
             return response.data[0].embedding
             
-        elif provider in ["local_huggingface", "sentence_transformers"]:
+        elif provider in ["local_huggingface", "sentence_transformers", "huggingface"]:
             # 本地 Sentence Transformers 模型
             embeddings = self.embedding_client.encode([text], convert_to_tensor=False)
             return embeddings[0].tolist()
+            
+        elif provider == "openai":
+            # OpenAI Embedding
+            response = self.embedding_client.embeddings.create(
+                model=self.embedding_model,
+                input=text
+            )
+            return response.data[0].embedding
             
         elif provider == "local_openai":
             # 本地 OpenAI 兼容 API
@@ -808,7 +971,7 @@ class MemoryManager:
     
     async def _call_llm(self, prompt: str) -> str:
         """调用LLM"""
-        provider = os.getenv("LLM_PROVIDER", "dashscope")
+        provider = os.getenv("MEM0_LLM_PROVIDER", os.getenv("LLM_PROVIDER", "dashscope"))
         
         if provider == "dashscope":
             from dashscope import Generation
@@ -824,7 +987,7 @@ class MemoryManager:
             else:
                 raise Exception(f"LLM调用失败: {response}")
                 
-        elif provider == "deepseek" or provider == "moonshot":
+        elif provider == "deepseek" or provider == "moonshot" or provider == "doubao":
             response = self.llm_client.chat.completions.create(
                 model=self.llm_model,
                 messages=[{"role": "user", "content": prompt}]
@@ -1023,6 +1186,12 @@ async def add_memory(
             {
                 "user_id": 3,
                 "content": "北京今天的最高温度是34度哦",
+                "role": "assistant",
+                "session_id": 123456
+            },
+            {
+                "user_id": 1,
+                "content": "我最怕热了，冷一点还行",
                 "role": "assistant",
                 "session_id": 123456
             }
