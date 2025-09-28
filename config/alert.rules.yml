@@ -1,0 +1,204 @@
+# Mem0 Prometheus告警规则
+
+groups:
+  # 服务可用性告警
+  - name: service_availability
+    rules:
+      - alert: Mem0APIDown
+        expr: up{job="mem0-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: mem0-api
+        annotations:
+          summary: "Mem0 API服务不可用"
+          description: "Mem0 API服务已停止响应超过1分钟"
+
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgres
+        annotations:
+          summary: "PostgreSQL数据库不可用"
+          description: "PostgreSQL数据库已停止响应超过1分钟"
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis缓存不可用"
+          description: "Redis缓存已停止响应超过1分钟"
+
+      - alert: ChromaDBDown
+        expr: up{job="chromadb"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: chromadb
+        annotations:
+          summary: "ChromaDB向量数据库不可用"
+          description: "ChromaDB向量数据库已停止响应超过2分钟"
+
+  # 性能告警
+  - name: performance
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU使用率过高"
+          description: "实例 {{ $labels.instance }} CPU使用率超过80%，当前值: {{ $value }}%"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "内存使用率过高"
+          description: "实例 {{ $labels.instance }} 内存使用率超过85%，当前值: {{ $value }}%"
+
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) / node_filesystem_size_bytes{fstype!="tmpfs"} * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘使用率过高"
+          description: "实例 {{ $labels.instance }} 磁盘使用率超过85%，挂载点: {{ $labels.mountpoint }}，当前值: {{ $value }}%"
+
+      - alert: HighAPIResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="mem0-api"}[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API响应时间过长"
+          description: "Mem0 API 95%分位响应时间超过2秒，当前值: {{ $value }}秒"
+
+  # 数据库告警
+  - name: database
+    rules:
+      - alert: PostgreSQLConnectionsHigh
+        expr: sum(pg_stat_activity_count) by (instance) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL连接数过高"
+          description: "PostgreSQL实例 {{ $labels.instance }} 连接数超过80，当前值: {{ $value }}"
+
+      - alert: PostgreSQLReplicationLag
+        expr: pg_replication_lag > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL复制延迟"
+          description: "PostgreSQL复制延迟超过60秒，当前值: {{ $value }}秒"
+
+      - alert: RedisMemoryUsageHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis内存使用率过高"
+          description: "Redis实例内存使用率超过90%，当前值: {{ $value }}%"
+
+      - alert: RedisConnectionsHigh
+        expr: redis_connected_clients > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis连接数过高"
+          description: "Redis连接数超过100，当前值: {{ $value }}"
+
+  # 应用程序告警
+  - name: application
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP错误率过高"
+          description: "5xx错误率超过5%，当前值: {{ $value }}%"
+
+      - alert: LowSuccessRate
+        expr: rate(http_requests_total{status=~"2.."}[5m]) / rate(http_requests_total[5m]) * 100 < 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP成功率过低"
+          description: "2xx成功率低于90%，当前值: {{ $value }}%"
+
+      - alert: MemoryLeakSuspected
+        expr: increase(process_resident_memory_bytes{job="mem0-api"}[1h]) > 100000000
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "疑似内存泄漏"
+          description: "Mem0 API进程内存在1小时内增长超过100MB"
+
+  # 容器告警
+  - name: containers
+    rules:
+      - alert: ContainerKilled
+        expr: time() - container_last_seen > 60
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "容器被终止"
+          description: "容器 {{ $labels.name }} 已被终止超过1分钟"
+
+      - alert: ContainerCpuUsageHigh
+        expr: (sum(rate(container_cpu_usage_seconds_total{name!=""}[3m])) BY (instance, name) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "容器CPU使用率过高"
+          description: "容器 {{ $labels.name }} CPU使用率超过80%，当前值: {{ $value }}%"
+
+      - alert: ContainerMemoryUsageHigh
+        expr: (sum(container_memory_working_set_bytes{name!=""}) BY (instance, name) / sum(container_spec_memory_limit_bytes > 0) BY (instance, name) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "容器内存使用率过高"
+          description: "容器 {{ $labels.name }} 内存使用率超过80%，当前值: {{ $value }}%"
+
+  # 网络告警
+  - name: network
+    rules:
+      - alert: UnusualNetworkThroughputIn
+        expr: sum by (instance) (rate(node_network_receive_bytes_total[2m])) / 1024 / 1024 > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "异常的网络吞吐量流入"
+          description: "实例 {{ $labels.instance }} 网络流入流量超过100MB/s，当前值: {{ $value }}MB/s"
+
+      - alert: UnusualNetworkThroughputOut
+        expr: sum by (instance) (rate(node_network_transmit_bytes_total[2m])) / 1024 / 1024 > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "异常的网络吞吐量流出"
+          description: "实例 {{ $labels.instance }} 网络流出流量超过100MB/s，当前值: {{ $value }}MB/s"

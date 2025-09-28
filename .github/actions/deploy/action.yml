@@ -1,0 +1,225 @@
+name: 'Deploy Mem0'
+description: '部署Mem0应用到云服务器'
+author: 'Mem0 Team'
+
+inputs:
+  environment:
+    description: '部署环境 (staging/production)'
+    required: true
+  image:
+    description: 'Docker镜像地址（包含digest）'
+    required: true
+  ssh-private-key:
+    description: 'SSH私钥'
+    required: true
+  ssh-host:
+    description: 'SSH主机地址'
+    required: true
+  ssh-user:
+    description: 'SSH用户名'
+    required: true
+    default: 'deploy'
+  ssh-port:
+    description: 'SSH端口'
+    required: false
+    default: '22'
+  deploy-path:
+    description: '服务器上的部署路径'
+    required: false
+    default: '/opt/mem0'
+
+outputs:
+  deployment-url:
+    description: '部署后的服务URL'
+    value: ${{ steps.deploy.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 设置SSH连接
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ inputs.ssh-private-key }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        ssh-keyscan -p ${{ inputs.ssh-port }} ${{ inputs.ssh-host }} >> ~/.ssh/known_hosts
+        
+    - name: 创建部署脚本
+      shell: bash
+      run: |
+        cat > deploy.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        # 部署配置
+        ENVIRONMENT="${{ inputs.environment }}"
+        IMAGE="${{ inputs.image }}"
+        DEPLOY_PATH="${{ inputs.deploy-path }}"
+        
+        echo "🚀 开始部署 Mem0 到 $ENVIRONMENT 环境"
+        echo "镜像: $IMAGE"
+        echo "路径: $DEPLOY_PATH"
+        
+        # 创建部署目录
+        sudo mkdir -p $DEPLOY_PATH
+        cd $DEPLOY_PATH
+        
+        # 备份当前版本
+        if [ -f docker-compose.prod.yml ]; then
+          echo "📦 备份当前版本..."
+          sudo cp docker-compose.prod.yml docker-compose.prod.yml.backup.$(date +%Y%m%d-%H%M%S)
+        fi
+        
+        # 下载新的配置文件
+        echo "📥 下载部署配置..."
+        curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/docker-compose.prod.yml -o docker-compose.prod.yml.new
+        curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/config/nginx.conf -o nginx.conf.new || true
+        curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/config/redis.conf -o redis.conf.new || true
+        
+        # 更新环境变量文件
+        echo "⚙️ 更新环境配置..."
+        cat > .env << ENVEOF
+        # Mem0 生产环境配置 - 自动生成于 $(date)
+        
+        # 镜像版本
+        VERSION=${{ github.ref_name }}
+        
+        # 构建信息
+        BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        VCS_REF=${{ github.sha }}
+        
+        # 数据库配置
+        POSTGRES_USER=mem0
+        POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+        POSTGRES_DB=mem0_db
+        POSTGRES_PORT=5432
+        
+        # Redis配置
+        REDIS_PORT=6379
+        REDIS_PASSWORD=${{ env.REDIS_PASSWORD }}
+        
+        # ChromaDB配置
+        CHROMA_PORT=8001
+        CHROMA_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider
+        CHROMA_AUTH_CREDENTIALS=${{ env.CHROMA_AUTH_CREDENTIALS }}
+        
+        # 应用配置
+        API_SECRET_KEY=${{ env.API_SECRET_KEY }}
+        APP_PORT=8000
+        LOG_LEVEL=INFO
+        
+        # LLM配置
+        MEM0_LLM_PROVIDER=${{ env.MEM0_LLM_PROVIDER }}
+        MEM0_LLM_MODEL=${{ env.MEM0_LLM_MODEL }}
+        OPENAI_API_KEY=${{ env.OPENAI_API_KEY }}
+        DEEPSEEK_API_KEY=${{ env.DEEPSEEK_API_KEY }}
+        
+        # 嵌入模型配置
+        MEM0_EMBEDDER_PROVIDER=sentence_transformers
+        MEM0_EMBEDDER_MODEL=shibing624/text2vec-base-chinese
+        
+        # Nginx配置
+        NGINX_HTTP_PORT=80
+        NGINX_HTTPS_PORT=443
+        
+        # 监控配置
+        ENABLE_METRICS=true
+        PROMETHEUS_PORT=9091
+        GRAFANA_PORT=3000
+        GRAFANA_PASSWORD=${{ env.GRAFANA_PASSWORD }}
+        ENVEOF
+        
+        # 创建配置目录
+        sudo mkdir -p config logs backups
+        
+        # 更新配置文件
+        if [ -f nginx.conf.new ]; then
+          sudo mv nginx.conf.new config/nginx.conf
+        fi
+        if [ -f redis.conf.new ]; then
+          sudo mv redis.conf.new config/redis.conf
+        fi
+        
+        # 设置自定义镜像
+        sed -i "s|image: mem0:.*|image: $IMAGE|g" docker-compose.prod.yml.new
+        sed -i "s|build:|# build:|g" docker-compose.prod.yml.new
+        sed -i "s|context: \.|# context: \.|g" docker-compose.prod.yml.new
+        sed -i "s|dockerfile: Dockerfile\.prod|# dockerfile: Dockerfile\.prod|g" docker-compose.prod.yml.new
+        
+        # 停止旧服务
+        echo "🛑 停止旧服务..."
+        sudo docker-compose -f docker-compose.prod.yml down --remove-orphans || true
+        
+        # 清理旧镜像（保留最近3个版本）
+        echo "🧹 清理旧镜像..."
+        sudo docker image prune -f || true
+        
+        # 拉取新镜像
+        echo "📥 拉取新镜像..."
+        sudo docker pull $IMAGE
+        
+        # 启动新服务
+        echo "🚀 启动新服务..."
+        sudo mv docker-compose.prod.yml.new docker-compose.prod.yml
+        sudo docker-compose -f docker-compose.prod.yml up -d
+        
+        # 等待服务启动
+        echo "⏳ 等待服务启动..."
+        sleep 30
+        
+        # 健康检查
+        echo "🏥 执行健康检查..."
+        for i in {1..10}; do
+          if curl -f http://localhost:8000/health; then
+            echo "✅ 健康检查通过"
+            break
+          else
+            echo "⏳ 等待服务启动... ($i/10)"
+            sleep 10
+          fi
+          
+          if [ $i -eq 10 ]; then
+            echo "❌ 健康检查失败，回滚服务"
+            sudo docker-compose -f docker-compose.prod.yml down
+            if [ -f docker-compose.prod.yml.backup.* ]; then
+              sudo cp $(ls -t docker-compose.prod.yml.backup.* | head -1) docker-compose.prod.yml
+              sudo docker-compose -f docker-compose.prod.yml up -d
+            fi
+            exit 1
+          fi
+        done
+        
+        # 显示服务状态
+        echo "📊 服务状态:"
+        sudo docker-compose -f docker-compose.prod.yml ps
+        
+        echo "🎉 部署完成！"
+        echo "环境: $ENVIRONMENT"
+        echo "镜像: $IMAGE"
+        echo "时间: $(date)"
+        EOF
+        
+        chmod +x deploy.sh
+        
+    - name: 执行部署
+      id: deploy
+      shell: bash
+      run: |
+        # 上传并执行部署脚本
+        scp -i ~/.ssh/deploy_key -P ${{ inputs.ssh-port }} deploy.sh ${{ inputs.ssh-user }}@${{ inputs.ssh-host }}:~/
+        
+        ssh -i ~/.ssh/deploy_key -p ${{ inputs.ssh-port }} ${{ inputs.ssh-user }}@${{ inputs.ssh-host }} 'bash ~/deploy.sh'
+        
+        # 设置输出
+        if [ "${{ inputs.environment }}" = "production" ]; then
+          echo "url=https://api.mem0.example.com" >> $GITHUB_OUTPUT
+        else
+          echo "url=https://staging.mem0.example.com" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: 清理SSH密钥
+      if: always()
+      shell: bash
+      run: |
+        rm -f ~/.ssh/deploy_key
+        rm -f deploy.sh

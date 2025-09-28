@@ -1,0 +1,92 @@
+# 多阶段构建的生产环境Dockerfile
+# Stage 1: 构建阶段
+FROM python:3.11-slim as builder
+
+# 设置构建环境变量
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# 安装构建依赖
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建虚拟环境
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# 复制并安装Python依赖
+COPY requirements.txt .
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 预下载嵌入模型
+COPY download_models.py .
+COPY .env* ./
+RUN mkdir -p /tmp/models && \
+    HF_HOME=/tmp/models TRANSFORMERS_CACHE=/tmp/models \
+    python download_models.py --recommended || true
+
+# Stage 2: 生产运行阶段
+FROM python:3.11-slim as production
+
+# 设置生产环境变量
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    ENVIRONMENT=production \
+    LOG_LEVEL=INFO
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    postgresql-client \
+    gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# 从构建阶段复制虚拟环境
+COPY --from=builder /opt/venv /opt/venv
+
+# 从构建阶段复制预下载的模型
+COPY --from=builder /tmp/models /app/data/huggingface
+
+# 创建应用用户
+RUN groupadd -r mem0 && useradd -r -g mem0 -u 1000 mem0
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制应用代码
+COPY app.py .
+COPY mysql_handler.py .
+COPY mem0/ ./mem0/
+COPY check_health.py .
+
+# 创建必要的目录并设置权限
+RUN mkdir -p /app/logs /app/data/chroma /app/data/huggingface /app/data/transformers && \
+    chown -R mem0:mem0 /app && \
+    chmod -R 755 /app
+
+# 复制启动脚本
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 切换到应用用户
+USER mem0
+
+# 暴露端口
+EXPOSE 8000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# 设置启动入口
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

@@ -1,0 +1,100 @@
+# Mem0 Prometheus监控配置
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'mem0-prod'
+    replica: 'prometheus-1'
+
+# Alertmanager配置
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# 告警规则文件
+rule_files:
+  - "alert.rules.yml"
+
+# 抓取配置
+scrape_configs:
+  # Prometheus自身
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Mem0 API服务
+  - job_name: 'mem0-api'
+    static_configs:
+      - targets: ['mem0-api:9090']
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+
+  # Redis监控
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis_exporter:9121']
+    scrape_interval: 30s
+
+  # PostgreSQL监控
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres_exporter:9187']
+    scrape_interval: 30s
+
+  # Node Exporter (系统监控)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node_exporter:9100']
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: node_exporter:9100
+
+  # Docker容器监控
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    honor_labels: true
+
+  # Nginx监控
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx_exporter:9113']
+    scrape_interval: 30s
+
+  # ChromaDB监控（如果有暴露metrics）
+  - job_name: 'chromadb'
+    static_configs:
+      - targets: ['chromadb:8000']
+    metrics_path: /api/v1/heartbeat
+    scrape_interval: 60s
+    params:
+      format: ['prometheus']
+
+# 远程写入配置（可选，用于长期存储）
+# remote_write:
+#   - url: "https://your-remote-storage/api/v1/write"
+#     basic_auth:
+#       username: "username"
+#       password: "password"
+
+# 远程读取配置（可选）
+# remote_read:
+#   - url: "https://your-remote-storage/api/v1/read"
+#     basic_auth:
+#       username: "username"
+#       password: "password"

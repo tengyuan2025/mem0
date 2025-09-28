@@ -1,0 +1,269 @@
+version: '3.8'
+
+# 生产环境Docker Compose配置
+services:
+  # PostgreSQL数据库（生产环境）
+  postgres:
+    image: postgres:15-alpine
+    container_name: mem0-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mem0}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-mem0_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    command: |
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.7
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mem0}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis缓存（生产环境）
+  redis:
+    image: redis:7-alpine
+    container_name: mem0-redis-prod
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    sysctls:
+      net.core.somaxconn: 1024
+
+  # ChromaDB向量数据库（生产环境）
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: mem0-chromadb-prod
+    environment:
+      - ALLOW_RESET=FALSE  # 生产环境禁用重置
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/data
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMA_AUTH_CREDENTIALS}
+      - CHROMA_SERVER_AUTHN_PROVIDER=${CHROMA_AUTH_PROVIDER:-chromadb.auth.token.TokenAuthServerProvider}
+    volumes:
+      - chroma_data:/chroma/data
+    ports:
+      - "${CHROMA_PORT:-8001}:8000"
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Mem0 API服务（生产环境）
+  mem0-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      args:
+        BUILD_DATE: ${BUILD_DATE}
+        VCS_REF: ${VCS_REF}
+        VERSION: ${VERSION:-latest}
+    image: mem0:${VERSION:-latest}
+    container_name: mem0-api-prod
+    environment:
+      # 数据库配置
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-mem0}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mem0_db}
+      
+      # 缓存配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      
+      # 向量数据库配置
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - CHROMA_AUTH_CREDENTIALS=${CHROMA_AUTH_CREDENTIALS}
+      
+      # 应用配置
+      - ENVIRONMENT=production
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # LLM配置
+      - MEM0_LLM_PROVIDER=${MEM0_LLM_PROVIDER}
+      - MEM0_LLM_MODEL=${MEM0_LLM_MODEL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      
+      # 嵌入模型配置
+      - MEM0_EMBEDDER_PROVIDER=${MEM0_EMBEDDER_PROVIDER:-sentence_transformers}
+      - MEM0_EMBEDDER_MODEL=${MEM0_EMBEDDER_MODEL:-shibing624/text2vec-base-chinese}
+      
+      # 监控配置
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_PORT=${METRICS_PORT:-9090}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+      - "${METRICS_PORT:-9090}:9090"  # Prometheus metrics
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./backups:/app/backups
+    networks:
+      - mem0-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # Nginx反向代理（生产环境）
+  nginx:
+    image: nginx:alpine
+    container_name: mem0-nginx-prod
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    networks:
+      - mem0-network
+    depends_on:
+      - mem0-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Prometheus监控（可选）
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mem0-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - mem0-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana监控面板（可选）
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mem0-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - mem0-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+networks:
+  mem0-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  chroma_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
