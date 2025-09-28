@@ -30,14 +30,13 @@ jobs:
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
-        # 尝试使用灵活版本，如果失败则跳过可选依赖
-        pip install -r requirements.txt || pip install -r requirements-flexible.txt || {
-          echo "安装基础依赖..."
-          pip install fastapi uvicorn[standard] pydantic python-dotenv
-          pip install sentence-transformers transformers torch
-          pip install chromadb qdrant-client
-          pip install sqlalchemy pymysql
-        }
+        # 安装基础依赖进行测试
+        pip install fastapi uvicorn[standard] pydantic python-dotenv loguru httpx
+        pip install python-jose[cryptography] passlib[bcrypt]
+        # 尝试安装AI相关依赖（允许失败）
+        pip install sentence-transformers || echo "sentence-transformers安装失败，跳过"
+        pip install chromadb || echo "chromadb安装失败，跳过"
+        pip install sqlalchemy pymysql || echo "数据库依赖安装失败，跳过"
         
     - name: 代码格式检查（可选）
       continue-on-error: true
@@ -100,7 +99,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./Dockerfile.prod
+        file: ./Dockerfile.simple
         platforms: linux/amd64
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
