@@ -26,10 +26,10 @@ class MySQLHandler:
         try:
             # 先连接到MySQL服务器（不指定数据库）来创建数据库
             temp_pool = await aiomysql.create_pool(
-                host=os.getenv('MYSQL_HOST', 'localhost'),
-                port=int(os.getenv('MYSQL_PORT', 3306)),
-                user=os.getenv('MYSQL_USER', 'root'),
-                password=os.getenv('MYSQL_PASSWORD', '123456'),
+                host=os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
+                port=int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
+                user=os.getenv('DATABASE_USER', os.getenv('MYSQL_USER', 'root')),
+                password=os.getenv('DATABASE_PASSWORD', os.getenv('MYSQL_PASSWORD', '123456')),
                 charset='utf8mb4',
                 autocommit=True,
                 minsize=1,
@@ -45,11 +45,11 @@ class MySQLHandler:
             
             # 创建连接到指定数据库的连接池
             self.pool = await aiomysql.create_pool(
-                host=os.getenv('MYSQL_HOST', 'localhost'),
-                port=int(os.getenv('MYSQL_PORT', 3306)),
-                user=os.getenv('MYSQL_USER', 'root'),
-                password=os.getenv('MYSQL_PASSWORD', '123456'),
-                db=os.getenv('MYSQL_DATABASE', 'mem0'),
+                host=os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
+                port=int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
+                user=os.getenv('DATABASE_USER', os.getenv('MYSQL_USER', 'root')),
+                password=os.getenv('DATABASE_PASSWORD', os.getenv('MYSQL_PASSWORD', '123456')),
+                db=os.getenv('DATABASE_NAME', os.getenv('MYSQL_DATABASE', 'mem0')),
                 charset='utf8mb4',
                 autocommit=True,
                 minsize=1,
@@ -72,7 +72,7 @@ class MySQLHandler:
             async with pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     # 创建数据库（如果不存在）
-                    db_name = os.getenv('MYSQL_DATABASE', 'mem0')
+                    db_name = os.getenv('DATABASE_NAME', os.getenv('MYSQL_DATABASE', 'mem0'))
                     await cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                     logger.info(f"确保数据库 {db_name} 存在")
         except Exception as e:
@@ -85,7 +85,7 @@ class MySQLHandler:
             async with self.pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     # 创建数据库（如果不存在）
-                    db_name = os.getenv('MYSQL_DATABASE', 'mem0')
+                    db_name = os.getenv('DATABASE_NAME', os.getenv('MYSQL_DATABASE', 'mem0'))
                     await cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                     await cursor.execute(f"USE {db_name}")
                     logger.info(f"确保数据库 {db_name} 存在")

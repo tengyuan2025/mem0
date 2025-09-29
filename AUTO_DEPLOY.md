@@ -33,6 +33,11 @@
    | `SSH_PRIVATE_KEY` | SSH私钥内容 | 必需 |
    | `DEEPSEEK_API_KEY` | DeepSeek API密钥 | 可选 |
    | `OPENAI_API_KEY` | OpenAI API密钥 | 可选 |
+   | `DATABASE_HOST` | 阿里云RDS数据库地址 | 必需 |
+   | `DATABASE_PORT` | 阿里云RDS端口(默认3306) | 必需 |
+   | `DATABASE_NAME` | 阿里云RDS数据库名 | 必需 |
+   | `DATABASE_USER` | 阿里云RDS用户名 | 必需 |
+   | `DATABASE_PASSWORD` | 阿里云RDS密码 | 必需 |
 
 ### 🔄 自动部署触发
 
@@ -154,7 +159,33 @@ API_SECRET_KEY=auto-generated
 MEM0_LLM_PROVIDER=deepseek
 DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
 
+# 阿里云RDS数据库配置（敏感信息从GitHub Secrets获取）
+DATABASE_HOST=rm-2zemktt1t7rbhr4adqo.mysql.rds.aliyuncs.com
+DATABASE_NAME=tenyuan
+DATABASE_USER=${DATABASE_USER}
+DATABASE_PASSWORD=${DATABASE_PASSWORD}
+ENABLE_MYSQL=true
+
 # 其他配置...
+```
+
+### 🗄️ 数据库配置
+
+项目已配置使用阿里云RDS MySQL数据库：
+- **数据库地址**: rm-2zemktt1t7rbhr4adqo.mysql.rds.aliyuncs.com
+- **数据库名**: tenyuan  
+- **安全性**: 所有数据库连接信息通过GitHub Secrets管理，不在源码中暴露
+- **自动初始化**: 部署时会自动创建必要的表结构
+- **双重存储**: 数据同时存储在向量数据库和MySQL中
+
+#### 🔐 数据库Secrets配置
+请在GitHub仓库中添加以下Secrets：
+```
+DATABASE_HOST=rm-2zemktt1t7rbhr4adqo.mysql.rds.aliyuncs.com
+DATABASE_PORT=3306
+DATABASE_NAME=tenyuan
+DATABASE_USER=dms_user_8cf3e5f
+DATABASE_PASSWORD=*Tengyuan2025
 ```
 
 ### 📈 监控和维护

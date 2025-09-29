@@ -28,6 +28,8 @@ MANIFEST
 .env
 .env.local
 .env.*.local
+.env.database
+.env.production
 *.env
 
 # IDE

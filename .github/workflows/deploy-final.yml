@@ -102,7 +102,7 @@ jobs:
             cp .env.server .env
           fi
           
-          # 替换API密钥
+          # 替换API密钥和数据库密钥
           if [ -f ".env" ]; then
             if [ ! -z "${{ secrets.DEEPSEEK_API_KEY }}" ]; then
               sed -i "s/\${DEEPSEEK_API_KEY}/${{ secrets.DEEPSEEK_API_KEY }}/g" .env 2>/dev/null || true
@@ -110,12 +110,35 @@ jobs:
             if [ ! -z "${{ secrets.OPENAI_API_KEY }}" ]; then
               sed -i "s/\${OPENAI_API_KEY}/${{ secrets.OPENAI_API_KEY }}/g" .env 2>/dev/null || true
             fi
+            if [ ! -z "${{ secrets.DATABASE_HOST }}" ]; then
+              sed -i "s/\${DATABASE_HOST}/${{ secrets.DATABASE_HOST }}/g" .env 2>/dev/null || true
+            fi
+            if [ ! -z "${{ secrets.DATABASE_PORT }}" ]; then
+              sed -i "s/\${DATABASE_PORT}/${{ secrets.DATABASE_PORT }}/g" .env 2>/dev/null || true
+            fi
+            if [ ! -z "${{ secrets.DATABASE_NAME }}" ]; then
+              sed -i "s/\${DATABASE_NAME}/${{ secrets.DATABASE_NAME }}/g" .env 2>/dev/null || true
+            fi
+            if [ ! -z "${{ secrets.DATABASE_USER }}" ]; then
+              sed -i "s/\${DATABASE_USER}/${{ secrets.DATABASE_USER }}/g" .env 2>/dev/null || true
+            fi
+            if [ ! -z "${{ secrets.DATABASE_PASSWORD }}" ]; then
+              # 需要转义特殊字符
+              DB_PASS=$(echo "${{ secrets.DATABASE_PASSWORD }}" | sed 's/[[\.*^$()+?{|]/\\&/g')
+              sed -i "s/\${DATABASE_PASSWORD}/$DB_PASS/g" .env 2>/dev/null || true
+            fi
             
             # 生成API密钥
             if grep -q "your-super-secret-key" .env 2>/dev/null; then
               API_SECRET=$(openssl rand -hex 32)
               sed -i "s/your-super-secret-key-change-this-in-production/$API_SECRET/g" .env
             fi
+          fi
+          
+          # 初始化数据库
+          echo "🗄️ 初始化云数据库..."
+          if [ -f "scripts/init_database.py" ]; then
+            python3 scripts/init_database.py || echo "⚠️ 数据库初始化失败，但继续部署"
           fi
           
           # 构建镜像
