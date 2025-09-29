@@ -8,6 +8,7 @@
    - 阿里云/腾讯云等云服务器
    - Ubuntu 20.04+ 或 CentOS 7+
    - 至少 2GB 内存，20GB 硬盘
+   - **推荐**：购买时选择预装Docker和Python（阿里云支持）
 
 2. **SSH密钥配置**
    ```bash
@@ -79,10 +80,14 @@ git push origin daily/0.0.1  # 自动部署到服务器
    http://你的服务器IP:8000/docs
    ```
 
-### 🛠️ 手动初始化服务器（可选）
+### 🛠️ 服务器环境选择
 
-如果想手动初始化服务器环境：
+**选择1：阿里云预装（推荐）**
+- 购买ECS时勾选"应用软件"中的Docker
+- 系统会自动安装Docker CE和Python
+- 无需手动配置，开箱即用
 
+**选择2：手动初始化服务器**
 ```bash
 # SSH登录服务器
 ssh root@你的服务器IP
@@ -100,9 +105,10 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/mem0/daily/0.0.1/sc
    - 检查 `SSH_PRIVATE_KEY` 是否正确
    - 确保服务器SSH端口开放
 
-2. **Docker安装失败**
-   - 网络问题，GitHub Actions会自动重试
-   - 服务器内存不足
+2. **Docker环境问题**
+   - 确保购买时选择了预装Docker
+   - 或手动安装：`curl -fsSL https://get.docker.com | bash`
+   - 启动服务：`systemctl start docker && systemctl enable docker`
 
 3. **服务启动失败**
    - 查看 GitHub Actions 日志

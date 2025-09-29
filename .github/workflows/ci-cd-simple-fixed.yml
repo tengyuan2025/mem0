@@ -119,42 +119,17 @@ jobs:
           exit 1
         fi
         
-        # 检查并自动安装Docker
-        echo "🐳 检查Docker..."
+        # 检查Docker环境
+        echo "🐳 检查Docker环境..."
         if ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker --version && docker ps"; then
           echo "✅ Docker运行正常"
         else
-          echo "🔧 Docker未安装或无法运行，开始自动安装..."
-          
-          # 下载并执行Docker安装脚本
-          echo "📥 下载Docker安装脚本..."
-          ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'INSTALL_DOCKER'
-            set -e
-            
-            # 下载安装脚本
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/scripts/deployment/install-docker.sh -o /tmp/install-docker.sh || \
-            wget -O /tmp/install-docker.sh https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/scripts/deployment/install-docker.sh
-            
-            # 执行安装
-            chmod +x /tmp/install-docker.sh
-            bash /tmp/install-docker.sh
-            
-            # 清理
-            rm -f /tmp/install-docker.sh
-        INSTALL_DOCKER
-          
-          # 再次验证Docker
-          echo "🔍 验证Docker安装..."
-          if ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker --version && docker ps"; then
-            echo "✅ Docker安装成功并运行正常"
-          else
-            echo "❌ Docker安装失败，请检查服务器环境"
-            echo "💡 手动解决方案："
-            echo "   ssh $SSH_USER@$SSH_HOST"
-            echo "   curl -fsSL https://get.docker.com | bash"
-            echo "   systemctl start docker && systemctl enable docker"
-            exit 1
-          fi
+          echo "❌ Docker未安装或无法运行"
+          echo "请确保服务器已安装Docker并正在运行："
+          echo "1. 阿里云购买时选择预装Docker"
+          echo "2. 或手动安装: curl -fsSL https://get.docker.com | bash"
+          echo "3. 启动服务: systemctl start docker && systemctl enable docker"
+          exit 1
         fi
         
         # 执行部署
