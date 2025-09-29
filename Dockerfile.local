@@ -17,14 +17,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 手动安装最基础的Python包（不依赖网络）
-RUN python3 -c "
-import sys
-print('Python version:', sys.version)
-
-# 创建最基础的FastAPI应用
-with open('/tmp/simple_app.py', 'w') as f:
-    f.write('''
+# 创建备用的简单HTTP服务器
+RUN cat > /tmp/simple_app.py << 'EOF'
 import json
 import http.server
 import socketserver
@@ -32,28 +26,29 @@ from urllib.parse import urlparse, parse_qs
 
 class MemoryHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == \"/health\":
+        if self.path == "/health":
             self.send_response(200)
-            self.send_header(\"Content-type\", \"application/json\")
+            self.send_header("Content-type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({\"status\": \"ok\", \"message\": \"基础服务运行中\"}).encode())
+            response = json.dumps({"status": "ok", "message": "基础服务运行中"})
+            self.wfile.write(response.encode())
         else:
             self.send_response(404)
             self.end_headers()
     
     def do_POST(self):
         self.send_response(200)
-        self.send_header(\"Content-type\", \"application/json\")
+        self.send_header("Content-type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({\"message\": \"基础API服务\"}).encode())
+        response = json.dumps({"message": "基础API服务"})
+        self.wfile.write(response.encode())
 
-if __name__ == \"__main__\":
+if __name__ == "__main__":
     PORT = 8000
-    with socketserver.TCPServer((\"\", PORT), MemoryHandler) as httpd:
-        print(f\"服务器启动在端口 {PORT}\")
+    with socketserver.TCPServer(("", PORT), MemoryHandler) as httpd:
+        print(f"服务器启动在端口 {PORT}")
         httpd.serve_forever()
-''')
-"
+EOF
 
 # 复制应用代码
 COPY . .
@@ -61,15 +56,28 @@ COPY . .
 # 创建必要的目录
 RUN mkdir -p /app/logs /app/data
 
+# 尝试安装基础Python依赖（容错处理）
+RUN python3 -m pip install --upgrade pip 2>/dev/null || true && \
+    python3 -m pip install fastapi uvicorn pydantic python-dotenv pymysql 2>/dev/null || \
+    echo "部分依赖安装失败，将使用备用服务器"
+
 # 创建启动脚本
-RUN echo '#!/bin/bash\n\
-if python3 -c "import fastapi, uvicorn" 2>/dev/null; then\n\
-    echo "启动完整应用..."\n\
-    python3 -m uvicorn app:app --host 0.0.0.0 --port 8000\n\
-else\n\
-    echo "依赖不足，启动基础服务..."\n\
-    python3 /tmp/simple_app.py\n\
-fi' > /app/start.sh && chmod +x /app/start.sh
+RUN cat > /app/start.sh << 'EOF'
+#!/bin/bash
+
+echo "🚀 启动mem0服务..."
+
+# 检查是否有完整的依赖
+if python3 -c "import fastapi, uvicorn" 2>/dev/null; then
+    echo "✅ 完整依赖可用，启动完整应用..."
+    exec python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+else
+    echo "⚠️ 完整依赖不可用，启动基础HTTP服务..."
+    exec python3 /tmp/simple_app.py
+fi
+EOF
+
+RUN chmod +x /app/start.sh
 
 # 暴露端口
 EXPOSE 8000

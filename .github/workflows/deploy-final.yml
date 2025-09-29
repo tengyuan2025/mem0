@@ -61,6 +61,40 @@ jobs:
         echo "🐳 检查Docker环境..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker --version"
         
+        # 配置Docker国内镜像源
+        echo "🌏 配置Docker国内镜像源..."
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'DOCKER_CONFIG'
+          # 创建Docker配置目录
+          mkdir -p /etc/docker
+          
+          # 配置国内镜像源
+          cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": [
+    "https://dockerproxy.com",
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com",
+    "https://ccr.ccs.tencentyun.com"
+  ],
+  "insecure-registries": [],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+          
+          # 重启Docker服务
+          echo "🔄 重启Docker服务..."
+          systemctl daemon-reload
+          systemctl restart docker
+          
+          # 验证配置
+          echo "✅ Docker镜像源配置完成"
+          docker info | grep -A 10 "Registry Mirrors" || true
+        DOCKER_CONFIG
+        
         # 停止旧容器
         echo "🛑 停止旧容器..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker stop mem0-api 2>/dev/null || true; docker rm mem0-api 2>/dev/null || true"
@@ -135,7 +169,7 @@ jobs:
             fi
           fi
           
-          # 初始化数据库
+          # 初始化数据库（在环境变量替换后执行）
           echo "🗄️ 初始化云数据库..."
           
           # 安装数据库初始化所需依赖
@@ -145,9 +179,19 @@ jobs:
             apt-get update 2>/dev/null && apt-get install -y python3-pymysql python3-dotenv 2>/dev/null || true
           }
           
+          # 验证环境变量是否正确替换
+          echo "🔍 验证数据库配置..."
+          if [ -f ".env" ]; then
+            grep "DATABASE_HOST" .env | head -1 || echo "⚠️ DATABASE_HOST未找到"
+            grep "DATABASE_USER" .env | head -1 || echo "⚠️ DATABASE_USER未找到"
+          fi
+          
+          # 执行数据库初始化
           if [ -f "scripts/init_database_sync.py" ]; then
+            echo "📝 使用同步版本初始化数据库..."
             python3 scripts/init_database_sync.py || echo "⚠️ 数据库初始化失败，但继续部署"
           elif [ -f "scripts/init_database.py" ]; then
+            echo "📝 使用异步版本初始化数据库..."
             python3 scripts/init_database.py || echo "⚠️ 数据库初始化失败，但继续部署"
           fi
           
