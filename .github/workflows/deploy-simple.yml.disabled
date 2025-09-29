@@ -98,23 +98,67 @@ jobs:
         # 备份配置
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "[ -f /opt/mem0/.env ] && cp /opt/mem0/.env /opt/mem0/data/.env.backup || true"
         
-        # 使用rsync同步代码
-        echo "🚀 同步代码到服务器..."
-        rsync -avz --delete \
-              --exclude='.git' \
-              --exclude='data/' \
-              --exclude='logs/' \
-              --exclude='backups/' \
-              --exclude='.env' \
-              --exclude='__pycache__/' \
-              --exclude='*.pyc' \
-              -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-              ./ $SSH_USER@$SSH_HOST:/opt/mem0/
+        # 打包并传输代码
+        echo "🚀 打包并传输代码到服务器..."
+        
+        # 创建临时目录并打包代码
+        TEMP_DIR=$(mktemp -d)
+        cp -r . "$TEMP_DIR/mem0"
+        cd "$TEMP_DIR/mem0"
+        
+        # 清理不需要的文件
+        rm -rf .git data logs backups .env __pycache__ *.pyc node_modules
+        find . -name "*.pyc" -delete
+        find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+        
+        # 打包代码
+        cd "$TEMP_DIR"
+        tar czf mem0-deploy.tar.gz mem0/
+        
+        # 传输到服务器
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no mem0-deploy.tar.gz $SSH_USER@$SSH_HOST:/tmp/
+        
+        # 清理本地临时文件
+        rm -rf "$TEMP_DIR"
         
         # 在服务器上执行部署
         echo "🔧 配置和启动服务..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'EOF'
           set -e
+          
+          # 解压代码到生产目录
+          echo "📦 解压代码..."
+          cd /tmp
+          tar xzf mem0-deploy.tar.gz
+          
+          # 同步到生产目录（保留数据目录）
+          echo "🔄 同步到生产目录..."
+          if [ -d "/opt/mem0/data" ]; then
+            echo "保留现有数据目录"
+          fi
+          
+          # 创建备份
+          if [ -d "/opt/mem0" ]; then
+            mv /opt/mem0 /opt/mem0.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+          fi
+          
+          # 移动新代码
+          mv mem0 /opt/mem0
+          
+          # 恢复数据目录
+          if [ -d "/opt/mem0.backup."* ]; then
+            BACKUP_DIR=$(ls -d /opt/mem0.backup.* | tail -1)
+            if [ -d "$BACKUP_DIR/data" ]; then
+              cp -r "$BACKUP_DIR/data" /opt/mem0/ 2>/dev/null || true
+            fi
+            if [ -f "$BACKUP_DIR/.env" ]; then
+              cp "$BACKUP_DIR/.env" /opt/mem0/ 2>/dev/null || true
+            fi
+          fi
+          
+          # 清理临时文件
+          rm -f /tmp/mem0-deploy.tar.gz
+          
           cd /opt/mem0
           
           # 配置环境

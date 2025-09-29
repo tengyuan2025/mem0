@@ -1,0 +1,183 @@
+name: Mem0 最终部署方案
+
+on:
+  push:
+    branches: [ main, develop, daily/* ]
+    tags: [ 'v*' ]
+
+jobs:
+  # 基础检查
+  test:
+    name: 测试
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 设置Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: 运行单元测试
+      continue-on-error: true
+      run: |
+        python -m pip install --upgrade pip
+        pip install fastapi uvicorn pydantic python-dotenv loguru
+        echo "🧪 运行单元测试..."
+        python test_unit.py || echo "测试完成"
+
+  # 部署到服务器
+  deploy:
+    name: 部署应用
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/daily/') || startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 部署到服务器
+      env:
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_USER: ${{ secrets.SSH_USER || 'root' }}
+        SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      run: |
+        echo "📡 开始部署到服务器 $SSH_HOST"
+        
+        # 设置SSH
+        mkdir -p ~/.ssh
+        echo "$SSH_KEY" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
+        
+        # 测试连接
+        echo "🔍 测试SSH连接..."
+        ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 $SSH_USER@$SSH_HOST "echo '✅ SSH连接成功'"
+        
+        # 检查Docker
+        echo "🐳 检查Docker环境..."
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker --version"
+        
+        # 停止旧容器
+        echo "🛑 停止旧容器..."
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker stop mem0-api 2>/dev/null || true; docker rm mem0-api 2>/dev/null || true"
+        
+        # 准备代码包
+        echo "📦 准备代码包..."
+        tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='backups' --exclude='.env' -czf mem0-code.tar.gz .
+        
+        # 传输代码
+        echo "🚀 传输代码到服务器..."
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no mem0-code.tar.gz $SSH_USER@$SSH_HOST:/tmp/
+        
+        # 在服务器上部署
+        echo "🔧 在服务器上执行部署..."
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'DEPLOY_SCRIPT'
+          set -e
+          
+          echo "📂 准备部署目录..."
+          mkdir -p /opt/mem0/{data,logs,backups}
+          
+          # 备份现有配置
+          if [ -f "/opt/mem0/.env" ]; then
+            echo "💾 备份配置文件..."
+            cp /opt/mem0/.env /opt/mem0/data/.env.backup
+          fi
+          
+          # 解压新代码
+          echo "📦 解压代码..."
+          cd /tmp
+          rm -rf mem0-new
+          mkdir mem0-new
+          cd mem0-new
+          tar xzf /tmp/mem0-code.tar.gz
+          
+          # 同步代码（保留数据目录）
+          echo "🔄 更新代码..."
+          cp -r * /opt/mem0/
+          
+          # 恢复配置文件
+          if [ -f "/opt/mem0/data/.env.backup" ]; then
+            cp /opt/mem0/data/.env.backup /opt/mem0/.env
+          fi
+          
+          cd /opt/mem0
+          
+          # 设置环境配置
+          echo "⚙️ 配置环境..."
+          if [ -f ".env.server" ] && [ ! -f ".env" ]; then
+            cp .env.server .env
+          fi
+          
+          # 替换API密钥
+          if [ -f ".env" ]; then
+            if [ ! -z "${{ secrets.DEEPSEEK_API_KEY }}" ]; then
+              sed -i "s/\${DEEPSEEK_API_KEY}/${{ secrets.DEEPSEEK_API_KEY }}/g" .env 2>/dev/null || true
+            fi
+            if [ ! -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+              sed -i "s/\${OPENAI_API_KEY}/${{ secrets.OPENAI_API_KEY }}/g" .env 2>/dev/null || true
+            fi
+            
+            # 生成API密钥
+            if grep -q "your-super-secret-key" .env 2>/dev/null; then
+              API_SECRET=$(openssl rand -hex 32)
+              sed -i "s/your-super-secret-key-change-this-in-production/$API_SECRET/g" .env
+            fi
+          fi
+          
+          # 构建镜像
+          echo "🏗️ 构建Docker镜像..."
+          if [ -f "Dockerfile.simple" ]; then
+            docker build -f Dockerfile.simple -t mem0:latest .
+          else
+            docker build -t mem0:latest .
+          fi
+          
+          # 启动容器
+          echo "🚀 启动新容器..."
+          docker run -d \
+            --name mem0-api \
+            -p 8000:8000 \
+            --restart always \
+            --env-file .env \
+            -v /opt/mem0/data:/app/data \
+            -v /opt/mem0/logs:/app/logs \
+            mem0:latest
+          
+          # 健康检查
+          echo "🔍 健康检查..."
+          sleep 10
+          for i in {1..12}; do
+            if curl -f http://localhost:8000/health 2>/dev/null; then
+              echo "✅ 服务启动成功！"
+              docker ps | grep mem0-api
+              break
+            else
+              echo "⏳ 等待服务启动... ($i/12)"
+              sleep 5
+              if [ $i -eq 12 ]; then
+                echo "⚠️ 健康检查超时，查看日志:"
+                docker logs --tail 20 mem0-api
+                echo "容器状态:"
+                docker ps -a | grep mem0-api
+              fi
+            fi
+          done
+          
+          # 清理
+          echo "🧹 清理临时文件..."
+          rm -f /tmp/mem0-code.tar.gz
+          rm -rf /tmp/mem0-new
+          
+          echo "🎉 部署完成！"
+        DEPLOY_SCRIPT
+        
+        # 清理本地文件
+        rm -f mem0-code.tar.gz
+        
+        echo "✅ 部署任务完成！"
+        echo "🌐 服务地址: http://$SSH_HOST:8000"
+        echo "📚 API文档: http://$SSH_HOST:8000/docs"

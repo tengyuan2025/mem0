@@ -110,10 +110,10 @@ curl -fsSL https://raw.githubusercontent.com/你的用户名/mem0/daily/0.0.1/sc
    - 或手动安装：`curl -fsSL https://get.docker.com | bash`
    - 启动服务：`systemctl start docker && systemctl enable docker`
 
-3. **网络连接问题（GitHub访问超时）**
-   - 已使用SSH方式克隆代码，更稳定可靠
-   - SSH方式避免了HTTPS的网络问题
-   - 部署流程：SSH克隆到临时目录 → rsync同步到生产目录
+3. **网络连接问题（已解决）**
+   - 使用tar+scp方式传输代码，无需rsync
+   - 部署流程：GitHub Actions打包 → scp传输 → 服务器解压部署
+   - 避免了所有网络依赖问题
 
 4. **服务启动失败**
    - 查看 GitHub Actions 日志
