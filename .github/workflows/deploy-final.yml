@@ -67,7 +67,30 @@ jobs:
         
         # 准备代码包
         echo "📦 准备代码包..."
-        tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='backups' --exclude='.env' -czf mem0-code.tar.gz .
+        
+        # 创建临时目录
+        TEMP_BUILD_DIR=$(mktemp -d)
+        echo "使用临时目录: $TEMP_BUILD_DIR"
+        
+        # 复制文件到临时目录
+        cp -r . "$TEMP_BUILD_DIR/"
+        cd "$TEMP_BUILD_DIR"
+        
+        # 删除不需要的文件和目录
+        rm -rf .git __pycache__ data logs backups .env node_modules .pytest_cache
+        find . -name "*.pyc" -delete
+        find . -name "*.log" -delete
+        find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+        
+        # 打包文件
+        tar czf mem0-code.tar.gz .
+        
+        # 移动到工作目录
+        mv mem0-code.tar.gz "$GITHUB_WORKSPACE/"
+        
+        # 返回工作目录并清理
+        cd "$GITHUB_WORKSPACE"
+        rm -rf "$TEMP_BUILD_DIR"
         
         # 传输代码
         echo "🚀 传输代码到服务器..."
