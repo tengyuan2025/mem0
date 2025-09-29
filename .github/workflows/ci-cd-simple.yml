@@ -216,21 +216,39 @@ jobs:
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'DEPLOY'
           set -e
           
-          echo "📂 准备部署目录..."
-          mkdir -p /opt/mem0/{data,logs,backups}
-          cd /opt/mem0
+          echo "📂 准备部署环境..."
           
-          # 克隆或更新代码
-          if [ ! -d ".git" ]; then
-            echo "📥 首次部署，克隆代码..."
-            git clone https://github.com/${{ github.repository }}.git .
-            chmod +x scripts/deployment/*.sh
-          else
-            echo "🔄 更新代码..."
-            git fetch origin
-            git reset --hard origin/${{ github.ref_name }}
-            chmod +x scripts/deployment/*.sh
+          # 创建临时目录进行代码更新
+          TEMP_DIR="/tmp/mem0_deploy_$(date +%Y%m%d_%H%M%S)"
+          mkdir -p "$TEMP_DIR"
+          
+          echo "📥 下载最新代码到临时目录..."
+          cd "$TEMP_DIR"
+          git clone https://github.com/${{ github.repository }}.git .
+          git checkout ${{ github.ref_name }}
+          
+          echo "🔄 同步代码到生产目录..."
+          # 创建生产目录
+          mkdir -p /opt/mem0/{data,logs,backups}
+          
+          # 停止旧容器（如果存在）
+          echo "🛑 停止旧容器..."
+          docker stop mem0-api 2>/dev/null || echo "没有运行的容器"
+          docker rm mem0-api 2>/dev/null || echo "没有要删除的容器"
+          
+          # 备份重要数据
+          if [ -f "/opt/mem0/.env" ]; then
+            echo "💾 备份环境配置..."
+            cp /opt/mem0/.env /opt/mem0/data/.env.backup
           fi
+          
+          # 同步代码文件（保留数据目录）
+          rsync -av --exclude='data/' --exclude='logs/' --exclude='backups/' \
+                --exclude='.env' "$TEMP_DIR/" /opt/mem0/
+          
+          # 切换到生产目录
+          cd /opt/mem0
+          chmod +x scripts/deployment/*.sh 2>/dev/null || true
           
           # 设置环境配置
           echo "⚙️ 配置环境变量..."
@@ -299,6 +317,10 @@ jobs:
           
           echo "🎉 部署完成！"
           echo "服务地址: http://$(curl -s ifconfig.me):8000"
+          
+          # 清理临时目录
+          echo "🧹 清理临时文件..."
+          rm -rf "$TEMP_DIR"
         DEPLOY
 
   # 通知部署结果（可选）
