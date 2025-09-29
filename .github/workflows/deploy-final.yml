@@ -65,36 +65,33 @@ jobs:
         echo "🛑 停止旧容器..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker stop mem0-api 2>/dev/null || true; docker rm mem0-api 2>/dev/null || true"
         
-        # 准备代码包
+        # 准备代码包 - 使用最简单可靠的方法
         echo "📦 准备代码包..."
         
-        # 创建临时目录
-        TEMP_BUILD_DIR=$(mktemp -d)
-        echo "使用临时目录: $TEMP_BUILD_DIR"
+        # 等待一下确保checkout完成
+        sleep 2
         
-        # 复制文件到临时目录
-        cp -r . "$TEMP_BUILD_DIR/"
-        cd "$TEMP_BUILD_DIR"
+        # 使用zip代替tar，避免文件变化检查
+        echo "📦 使用zip打包代码..."
+        zip -r mem0-code.zip . \
+          -x ".git/*" "__pycache__/*" "*.pyc" "data/*" "logs/*" "backups/*" ".env" \
+             "node_modules/*" ".pytest_cache/*" "*.log" ".DS_Store" "venv/*" ".venv/*" \
+          2>/dev/null || echo "⚠️ zip有警告但继续执行"
         
-        # 删除不需要的文件和目录
-        rm -rf .git __pycache__ data logs backups .env node_modules .pytest_cache
-        find . -name "*.pyc" -delete
-        find . -name "*.log" -delete
-        find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-        
-        # 打包文件
-        tar czf mem0-code.tar.gz .
-        
-        # 移动到工作目录
-        mv mem0-code.tar.gz "$GITHUB_WORKSPACE/"
-        
-        # 返回工作目录并清理
-        cd "$GITHUB_WORKSPACE"
-        rm -rf "$TEMP_BUILD_DIR"
+        # 检查zip文件
+        if [ -f mem0-code.zip ]; then
+          echo "✅ 代码包准备完成: $(ls -lh mem0-code.zip)"
+        else
+          echo "❌ zip打包失败，使用备用方案..."
+          # 备用方案：只打包关键文件
+          zip mem0-code.zip \
+            *.py *.txt *.md requirements*.txt Dockerfile* .env.server \
+            scripts/ mem0/ tests/ 2>/dev/null || true
+        fi
         
         # 传输代码
         echo "🚀 传输代码到服务器..."
-        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no mem0-code.tar.gz $SSH_USER@$SSH_HOST:/tmp/
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no mem0-code.zip $SSH_USER@$SSH_HOST:/tmp/
         
         # 在服务器上部署
         echo "🔧 在服务器上执行部署..."
@@ -114,9 +111,8 @@ jobs:
           echo "📦 解压代码..."
           cd /tmp
           rm -rf mem0-new
-          mkdir mem0-new
+          unzip -q mem0-code.zip -d mem0-new
           cd mem0-new
-          tar xzf /tmp/mem0-code.tar.gz
           
           # 同步代码（保留数据目录）
           echo "🔄 更新代码..."
@@ -192,14 +188,14 @@ jobs:
           
           # 清理
           echo "🧹 清理临时文件..."
-          rm -f /tmp/mem0-code.tar.gz
+          rm -f /tmp/mem0-code.zip
           rm -rf /tmp/mem0-new
           
           echo "🎉 部署完成！"
         DEPLOY_SCRIPT
         
         # 清理本地文件
-        rm -f mem0-code.tar.gz
+        rm -f mem0-code.zip
         
         echo "✅ 部署任务完成！"
         echo "🌐 服务地址: http://$SSH_HOST:8000"
