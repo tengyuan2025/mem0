@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Mem0 部署状态检查脚本
-# 用法: ./check-deployment.sh [服务器IP]
+# 使用方法: ./scripts/check-deployment.sh [服务器IP] [SSH用户]
+
+set -e
 
 # 颜色定义
 RED='\033[0;31m'
@@ -10,221 +12,175 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# 配置
-SERVER_IP=${1:-"你的服务器IP"}
-SSH_USER="deploy"
-API_PORT="8000"
+log() { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# 日志函数
-log() { echo -e "${GREEN}[✓]${NC} $1"; }
-warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[✗]${NC} $1"; }
-info() { echo -e "${BLUE}[i]${NC} $1"; }
+# 参数检查
+if [ $# -lt 1 ]; then
+    echo "使用方法: $0 <服务器IP> [SSH用户名]"
+    echo "示例: $0 192.168.1.100 root"
+    exit 1
+fi
 
-echo -e "${BLUE}════════════════════════════════════════════${NC}"
-echo -e "${BLUE}   Mem0 部署状态检查${NC}"
-echo -e "${BLUE}════════════════════════════════════════════${NC}"
-echo
+SSH_HOST="$1"
+SSH_USER="${2:-root}"
 
-# 1. 检查服务器连接
-check_server_connection() {
-    info "检查服务器连接..."
-    
-    if ping -c 1 -W 2 $SERVER_IP > /dev/null 2>&1; then
-        log "服务器 $SERVER_IP 可达"
-    else
-        error "无法连接到服务器 $SERVER_IP"
-        return 1
-    fi
-    
-    # 测试SSH连接
-    if ssh -o ConnectTimeout=5 $SSH_USER@$SERVER_IP "echo 'SSH OK'" > /dev/null 2>&1; then
-        log "SSH连接正常"
-    else
-        warn "SSH连接失败，尝试使用root用户"
-        SSH_USER="root"
-        if ssh -o ConnectTimeout=5 $SSH_USER@$SERVER_IP "echo 'SSH OK'" > /dev/null 2>&1; then
-            log "使用root用户SSH连接成功"
-        else
-            error "SSH连接失败"
-            return 1
-        fi
-    fi
-}
+log "🔍 检查服务器 $SSH_HOST 上的 Mem0 部署状态..."
 
-# 2. 检查Docker服务
-check_docker() {
-    info "检查Docker服务..."
-    
-    # 检查Docker是否安装
-    if ssh $SSH_USER@$SERVER_IP "which docker" > /dev/null 2>&1; then
-        log "Docker已安装"
-    else
-        error "Docker未安装"
-        return 1
-    fi
+# 检查SSH连接
+echo "📡 测试SSH连接..."
+if ssh -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" "echo 'SSH连接正常'" 2>/dev/null; then
+    log "✅ SSH连接正常"
+else
+    error "❌ SSH连接失败"
+    echo "请检查："
+    echo "1. 服务器IP是否正确: $SSH_HOST"
+    echo "2. SSH用户是否正确: $SSH_USER"
+    echo "3. 服务器是否在线"
+    echo "4. SSH端口是否开放"
+    exit 1
+fi
+
+# 检查Docker状态
+echo ""
+echo "🐳 检查Docker状态..."
+docker_status=$(ssh "$SSH_USER@$SSH_HOST" "docker --version 2>/dev/null && echo 'INSTALLED' || echo 'NOT_INSTALLED'")
+if [[ "$docker_status" == *"INSTALLED"* ]]; then
+    log "✅ Docker已安装"
+    docker_version=$(ssh "$SSH_USER@$SSH_HOST" "docker --version")
+    echo "   版本: $docker_version"
     
     # 检查Docker服务状态
-    if ssh $SSH_USER@$SERVER_IP "sudo systemctl is-active docker" | grep -q "active"; then
-        log "Docker服务运行中"
+    docker_running=$(ssh "$SSH_USER@$SSH_HOST" "systemctl is-active docker 2>/dev/null || echo 'inactive'")
+    if [ "$docker_running" = "active" ]; then
+        log "✅ Docker服务运行正常"
     else
-        error "Docker服务未运行"
-        return 1
+        warn "⚠️ Docker服务未运行"
     fi
-}
+else
+    error "❌ Docker未安装"
+fi
 
-# 3. 检查Mem0容器
-check_containers() {
-    info "检查Mem0容器..."
+# 检查Mem0容器状态
+echo ""
+echo "📦 检查Mem0容器状态..."
+container_info=$(ssh "$SSH_USER@$SSH_HOST" "docker ps -a --filter name=mem0-api --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo 'NO_CONTAINER'")
+
+if [[ "$container_info" == *"mem0-api"* ]]; then
+    echo "$container_info"
     
-    # 获取运行中的容器
-    containers=$(ssh $SSH_USER@$SERVER_IP "sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep -E 'mem0|nginx|postgres|redis|chroma'" 2>/dev/null)
-    
-    if [ -z "$containers" ]; then
-        warn "没有找到Mem0相关容器"
+    # 检查容器是否运行
+    if [[ "$container_info" == *"Up"* ]]; then
+        log "✅ Mem0容器运行正常"
         
-        # 检查停止的容器
-        stopped=$(ssh $SSH_USER@$SERVER_IP "sudo docker ps -a --filter 'status=exited' --format '{{.Names}}' | grep -E 'mem0'" 2>/dev/null)
-        if [ ! -z "$stopped" ]; then
-            error "发现停止的容器: $stopped"
-        fi
-        return 1
-    else
-        log "找到运行中的容器:"
-        echo "$containers" | while read line; do
-            echo "    $line"
-        done
-    fi
-    
-    # 专门检查mem0-api容器
-    if ssh $SSH_USER@$SERVER_IP "sudo docker ps | grep -q 'mem0-api'"; then
-        log "Mem0 API容器运行中"
-    else
-        # 尝试简单的Python应用
-        if ssh $SSH_USER@$SERVER_IP "ps aux | grep -v grep | grep -E 'uvicorn|python.*app'" > /dev/null 2>&1; then
-            log "发现Python应用进程"
+        # 获取端口信息
+        if [[ "$container_info" == *"8000"* ]]; then
+            log "✅ 端口8000已映射"
         else
-            warn "Mem0 API容器未运行"
+            warn "⚠️ 端口8000未正确映射"
         fi
-    fi
-}
-
-# 4. 检查API服务
-check_api_service() {
-    info "检查API服务..."
-    
-    # 检查端口监听
-    if ssh $SSH_USER@$SERVER_IP "sudo netstat -tlnp | grep -q :$API_PORT" 2>/dev/null || \
-       ssh $SSH_USER@$SERVER_IP "sudo ss -tlnp | grep -q :$API_PORT" 2>/dev/null; then
-        log "端口 $API_PORT 正在监听"
     else
-        warn "端口 $API_PORT 未监听"
-    fi
-    
-    # 测试健康检查端点
-    echo -n "  测试健康检查端点... "
-    
-    # 从服务器内部测试
-    if ssh $SSH_USER@$SERVER_IP "curl -s -f http://localhost:$API_PORT/health" > /dev/null 2>&1; then
-        echo -e "${GREEN}成功${NC}"
-        log "API健康检查通过"
-    else
-        echo -e "${RED}失败${NC}"
+        warn "⚠️ Mem0容器已停止"
         
-        # 尝试根路径
-        if ssh $SSH_USER@$SERVER_IP "curl -s -f http://localhost:$API_PORT/" > /dev/null 2>&1; then
-            warn "根路径可访问，但健康检查端点不可用"
+        # 查看容器日志
+        echo "🔍 最近的容器日志："
+        ssh "$SSH_USER@$SSH_HOST" "docker logs --tail 10 mem0-api 2>/dev/null || echo '无法获取日志'"
+    fi
+else
+    error "❌ 未找到Mem0容器"
+fi
+
+# 检查应用目录
+echo ""
+echo "📁 检查应用目录..."
+app_dir_info=$(ssh "$SSH_USER@$SSH_HOST" "ls -la /opt/mem0/ 2>/dev/null || echo 'NOT_FOUND'")
+if [[ "$app_dir_info" != "NOT_FOUND" ]]; then
+    log "✅ 应用目录存在: /opt/mem0/"
+    
+    # 检查关键文件
+    key_files=(".env" "app.py" "Dockerfile.simple")
+    for file in "${key_files[@]}"; do
+        file_exists=$(ssh "$SSH_USER@$SSH_HOST" "[ -f /opt/mem0/$file ] && echo 'EXISTS' || echo 'NOT_FOUND'")
+        if [ "$file_exists" = "EXISTS" ]; then
+            log "✅ $file 文件存在"
         else
-            error "API服务不可访问"
+            warn "⚠️ $file 文件不存在"
         fi
-    fi
-    
-    # 从外部测试（如果端口开放）
-    echo -n "  从外部测试API... "
-    if curl -s -f -m 5 "http://$SERVER_IP:$API_PORT/health" > /dev/null 2>&1; then
-        echo -e "${GREEN}成功${NC}"
-        log "外部可访问API"
-    else
-        echo -e "${YELLOW}失败${NC}"
-        warn "外部无法访问API（可能是防火墙限制）"
-    fi
-}
+    done
+else
+    error "❌ 应用目录不存在: /opt/mem0/"
+fi
 
-# 5. 检查日志
-check_logs() {
-    info "检查最近日志..."
+# API健康检查
+echo ""
+echo "🔍 API健康检查..."
+health_check=$(ssh "$SSH_USER@$SSH_HOST" "curl -f http://localhost:8000/health 2>/dev/null && echo 'HEALTHY' || echo 'UNHEALTHY'")
+if [ "$health_check" = "HEALTHY" ]; then
+    log "✅ API健康检查通过"
     
-    # 检查Docker日志
-    if ssh $SSH_USER@$SERVER_IP "sudo docker logs --tail 10 mem0-api 2>&1 | grep -q 'ERROR'" 2>/dev/null; then
-        warn "发现错误日志"
-    else
-        log "未发现明显错误"
-    fi
-    
-    # 显示最后几行日志
-    echo "  最近的应用日志:"
-    ssh $SSH_USER@$SERVER_IP "sudo docker logs --tail 5 mem0-api 2>&1" 2>/dev/null || \
-    ssh $SSH_USER@$SERVER_IP "sudo tail -5 /opt/mem0/logs/app.log 2>/dev/null" || \
-    echo "    （无法获取日志）"
-}
+    # 获取API信息
+    api_info=$(ssh "$SSH_USER@$SSH_HOST" "curl -s http://localhost:8000/health 2>/dev/null || echo '{}'")
+    echo "   API响应: $api_info"
+else
+    error "❌ API健康检查失败"
+    echo "   请检查容器日志或服务配置"
+fi
 
-# 6. 系统资源检查
-check_resources() {
-    info "检查系统资源..."
-    
-    # 内存使用
-    mem_usage=$(ssh $SSH_USER@$SERVER_IP "free -m | grep Mem | awk '{print int(\$3/\$2*100)}'" 2>/dev/null)
-    if [ ! -z "$mem_usage" ]; then
-        if [ "$mem_usage" -lt 80 ]; then
-            log "内存使用率: ${mem_usage}%"
-        else
-            warn "内存使用率较高: ${mem_usage}%"
-        fi
-    fi
-    
-    # 磁盘使用
-    disk_usage=$(ssh $SSH_USER@$SERVER_IP "df -h / | tail -1 | awk '{print \$5}' | sed 's/%//'" 2>/dev/null)
-    if [ ! -z "$disk_usage" ]; then
-        if [ "$disk_usage" -lt 80 ]; then
-            log "磁盘使用率: ${disk_usage}%"
-        else
-            warn "磁盘使用率较高: ${disk_usage}%"
-        fi
-    fi
-}
+# 检查系统资源
+echo ""
+echo "📊 系统资源使用情况..."
+memory_info=$(ssh "$SSH_USER@$SSH_HOST" "free -h | grep Mem | awk '{print \"使用: \" \$3 \"/\" \$2 \" (\" \$3/\$2*100 \"%)\"}'")
+disk_info=$(ssh "$SSH_USER@$SSH_HOST" "df -h /opt/mem0 2>/dev/null | tail -1 | awk '{print \"使用: \" \$3 \"/\" \$2 \" (\" \$5 \")\"}' || echo '无法获取磁盘信息'")
 
-# 主函数
-main() {
-    local failed=0
-    
-    # 运行所有检查
-    check_server_connection || ((failed++))
-    check_docker || ((failed++))
-    check_containers || ((failed++))
-    check_api_service || ((failed++))
-    check_logs
-    check_resources
-    
-    echo
-    echo -e "${BLUE}════════════════════════════════════════════${NC}"
-    
-    if [ $failed -eq 0 ]; then
-        echo -e "${GREEN}✅ 部署状态: 正常${NC}"
-        echo
-        info "API地址: http://$SERVER_IP:$API_PORT"
-        info "文档地址: http://$SERVER_IP:$API_PORT/docs"
-    else
-        echo -e "${YELLOW}⚠️ 部署状态: 存在问题${NC}"
-        echo
-        echo "建议操作:"
-        echo "1. SSH登录服务器: ssh $SSH_USER@$SERVER_IP"
-        echo "2. 查看容器: docker ps -a"
-        echo "3. 查看日志: docker logs mem0-api"
-        echo "4. 重启服务: cd /opt/mem0 && docker-compose restart"
-    fi
-    
-    echo -e "${BLUE}════════════════════════════════════════════${NC}"
-}
+echo "💾 内存: $memory_info"
+echo "💿 磁盘: $disk_info"
 
-# 运行主函数
-main
+# 检查网络端口
+echo ""
+echo "🌐 网络端口检查..."
+port_info=$(ssh "$SSH_USER@$SSH_HOST" "netstat -tulpn | grep :8000 || echo 'PORT_NOT_LISTENING'")
+if [[ "$port_info" != "PORT_NOT_LISTENING" ]]; then
+    log "✅ 端口8000正在监听"
+    echo "   $port_info"
+else
+    warn "⚠️ 端口8000未在监听"
+fi
+
+# 总结
+echo ""
+echo "📋 部署状态总结："
+echo "=================================="
+
+# 基础环境检查
+if [[ "$docker_status" == *"INSTALLED"* ]] && [ "$docker_running" = "active" ]; then
+    log "✅ Docker环境: 正常"
+else
+    error "❌ Docker环境: 异常"
+fi
+
+# 应用状态检查
+if [[ "$container_info" == *"Up"* ]] && [ "$health_check" = "HEALTHY" ]; then
+    log "✅ Mem0应用: 运行正常"
+    echo ""
+    echo "🎉 Mem0服务部署成功！"
+    echo "📱 API文档: http://$SSH_HOST:8000/docs"
+    echo "🔍 健康检查: http://$SSH_HOST:8000/health"
+elif [[ "$container_info" == *"mem0-api"* ]]; then
+    warn "⚠️ Mem0应用: 容器存在但服务异常"
+    echo ""
+    echo "🔧 建议操作："
+    echo "1. 重启容器: ssh $SSH_USER@$SSH_HOST 'cd /opt/mem0 && docker restart mem0-api'"
+    echo "2. 查看日志: ssh $SSH_USER@$SSH_HOST 'docker logs mem0-api'"
+    echo "3. 重新部署: 推送代码到GitHub触发自动部署"
+else
+    error "❌ Mem0应用: 未部署或部署失败"
+    echo ""
+    echo "🔧 建议操作："
+    echo "1. 检查GitHub Actions部署日志"
+    echo "2. 手动部署: ssh $SSH_USER@$SSH_HOST 'cd /opt && rm -rf mem0 && git clone <your-repo>'"
+    echo "3. 运行部署脚本: ./scripts/deployment/setup-server.sh"
+fi
+
+echo ""
+log "🔍 检查完成！"

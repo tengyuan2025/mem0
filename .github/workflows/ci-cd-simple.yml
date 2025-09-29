@@ -191,24 +191,68 @@ jobs:
         
         # 检查Docker
         echo "🐳 检查Docker安装..."
-        if ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "which docker"; then
-          echo "✅ Docker已安装"
+        if ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "which docker && docker --version"; then
+          echo "✅ Docker已安装并可用"
         else
-          echo "❌ Docker未安装，尝试安装..."
+          echo "❌ Docker未安装或不可用，开始安装..."
           ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'INSTALL_DOCKER'
-            # 安装Docker（阿里云镜像）
-            curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun
+            set -e
+            
+            echo "开始安装Docker..."
+            
+            # 卸载旧版本（如果存在）
+            yum remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine 2>/dev/null || true
+            
+            # 安装依赖
+            yum install -y yum-utils device-mapper-persistent-data lvm2
+            
+            # 添加阿里云Docker仓库
+            yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+            
+            # 安装Docker CE
+            yum install -y docker-ce docker-ce-cli containerd.io
+            
+            # 启动Docker服务
             systemctl start docker
             systemctl enable docker
             
+            # 配置Docker镜像加速
+            mkdir -p /etc/docker
+            cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": [
+    "https://registry.cn-hangzhou.aliyuncs.com",
+    "https://docker.mirrors.ustc.edu.cn"
+  ]
+}
+EOF
+            
+            # 重启Docker应用配置
+            systemctl daemon-reload
+            systemctl restart docker
+            
             # 安装Docker Compose
+            echo "安装Docker Compose..."
             curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
             chmod +x /usr/local/bin/docker-compose
+            ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
             
-            echo "Docker安装完成"
+            # 验证安装
+            echo "验证Docker安装..."
             docker --version
             docker-compose --version
+            
+            echo "✅ Docker安装完成"
         INSTALL_DOCKER
+        
+          # 再次验证Docker可用性
+          echo "🔍 验证Docker服务..."
+          if ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "systemctl is-active docker && docker ps"; then
+            echo "✅ Docker服务运行正常"
+          else
+            echo "❌ Docker服务异常，尝试重启..."
+            ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "systemctl restart docker && sleep 5 && docker ps"
+          fi
         fi
         
         # 执行部署
