@@ -65,33 +65,8 @@ jobs:
         echo "🛑 停止旧容器..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker stop mem0-api 2>/dev/null || true; docker rm mem0-api 2>/dev/null || true"
         
-        # 准备代码包 - 使用最简单可靠的方法
-        echo "📦 准备代码包..."
-        
-        # 等待一下确保checkout完成
-        sleep 2
-        
-        # 使用zip代替tar，避免文件变化检查
-        echo "📦 使用zip打包代码..."
-        zip -r mem0-code.zip . \
-          -x ".git/*" "__pycache__/*" "*.pyc" "data/*" "logs/*" "backups/*" ".env" \
-             "node_modules/*" ".pytest_cache/*" "*.log" ".DS_Store" "venv/*" ".venv/*" \
-          2>/dev/null || echo "⚠️ zip有警告但继续执行"
-        
-        # 检查zip文件
-        if [ -f mem0-code.zip ]; then
-          echo "✅ 代码包准备完成: $(ls -lh mem0-code.zip)"
-        else
-          echo "❌ zip打包失败，使用备用方案..."
-          # 备用方案：只打包关键文件
-          zip mem0-code.zip \
-            *.py *.txt *.md requirements*.txt Dockerfile* .env.server \
-            scripts/ mem0/ tests/ 2>/dev/null || true
-        fi
-        
-        # 传输代码
-        echo "🚀 传输代码到服务器..."
-        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no mem0-code.zip $SSH_USER@$SSH_HOST:/tmp/
+        # 使用git pull更新代码
+        echo "🔄 使用git方式更新服务器代码..."
         
         # 在服务器上部署
         echo "🔧 在服务器上执行部署..."
@@ -99,31 +74,27 @@ jobs:
           set -e
           
           echo "📂 准备部署目录..."
-          mkdir -p /opt/mem0/{data,logs,backups}
+          mkdir -p /root/mem0/{data,logs,backups}
+          
+          # 切换到代码目录
+          cd /root/mem0
           
           # 备份现有配置
-          if [ -f "/opt/mem0/.env" ]; then
+          if [ -f ".env" ]; then
             echo "💾 备份配置文件..."
-            cp /opt/mem0/.env /opt/mem0/data/.env.backup
+            cp .env data/.env.backup
           fi
           
-          # 解压新代码
-          echo "📦 解压代码..."
-          cd /tmp
-          rm -rf mem0-new
-          unzip -q mem0-code.zip -d mem0-new
-          cd mem0-new
-          
-          # 同步代码（保留数据目录）
+          # 使用git更新代码
           echo "🔄 更新代码..."
-          cp -r * /opt/mem0/
+          git fetch origin
+          git checkout ${{ github.ref_name }}
+          git pull origin ${{ github.ref_name }}
           
           # 恢复配置文件
-          if [ -f "/opt/mem0/data/.env.backup" ]; then
-            cp /opt/mem0/data/.env.backup /opt/mem0/.env
+          if [ -f "data/.env.backup" ]; then
+            cp data/.env.backup .env
           fi
-          
-          cd /opt/mem0
           
           # 设置环境配置
           echo "⚙️ 配置环境..."
@@ -186,16 +157,8 @@ jobs:
             fi
           done
           
-          # 清理
-          echo "🧹 清理临时文件..."
-          rm -f /tmp/mem0-code.zip
-          rm -rf /tmp/mem0-new
-          
           echo "🎉 部署完成！"
         DEPLOY_SCRIPT
-        
-        # 清理本地文件
-        rm -f mem0-code.zip
         
         echo "✅ 部署任务完成！"
         echo "🌐 服务地址: http://$SSH_HOST:8000"
