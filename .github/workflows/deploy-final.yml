@@ -137,16 +137,30 @@ jobs:
           
           # 初始化数据库
           echo "🗄️ 初始化云数据库..."
-          if [ -f "scripts/init_database.py" ]; then
+          if [ -f "scripts/init_database_sync.py" ]; then
+            python3 scripts/init_database_sync.py || echo "⚠️ 数据库初始化失败，但继续部署"
+          elif [ -f "scripts/init_database.py" ]; then
+            python3 -m pip install pymysql python-dotenv 2>/dev/null || true
             python3 scripts/init_database.py || echo "⚠️ 数据库初始化失败，但继续部署"
           fi
           
-          # 构建镜像
+          # 构建镜像（多策略容错）
           echo "🏗️ 构建Docker镜像..."
-          if [ -f "Dockerfile.simple" ]; then
-            docker build -f Dockerfile.simple -t mem0:latest .
+          
+          # 策略1：使用官方Python镜像
+          if docker build -f Dockerfile.simple -t mem0:latest . 2>/dev/null; then
+            echo "✅ 使用官方Python镜像构建成功"
+          # 策略2：使用Ubuntu基础镜像
+          elif [ -f "Dockerfile.minimal" ] && docker build -f Dockerfile.minimal -t mem0:latest . 2>/dev/null; then
+            echo "✅ 使用Ubuntu基础镜像构建成功"
+          # 策略3：尝试使用默认Dockerfile
+          elif docker build -t mem0:latest . 2>/dev/null; then
+            echo "✅ 使用默认Dockerfile构建成功"
           else
-            docker build -t mem0:latest .
+            echo "❌ 所有Docker构建策略都失败了"
+            echo "🔍 检查Docker环境和网络连接..."
+            docker version
+            exit 1
           fi
           
           # 启动容器

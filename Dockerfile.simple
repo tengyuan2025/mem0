@@ -1,5 +1,5 @@
-# 使用阿里云镜像源
-FROM registry.cn-hangzhou.aliyuncs.com/library/python:3.11-slim
+# 使用官方Python镜像 (如果Docker Hub被阻可自动切换镜像源)
+FROM python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
