@@ -147,28 +147,20 @@ jobs:
         
         # 设置服务器SSH密钥用于Git访问
         echo "🔑 配置服务器Git SSH密钥..."
-        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'SETUP_GIT'
-          # 创建SSH目录
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          # 配置Git SSH（使用GitHub部署密钥）
-          cat > ~/.ssh/config << 'EOF'
-Host github.com
-    HostName github.com
-    User git
-    Port 22
-    IdentitiesOnly yes
-    StrictHostKeyChecking no
-EOF
-          
-          # 添加GitHub到known_hosts
-          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-        SETUP_GIT
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null"
         
         # 将部署密钥复制到服务器
         echo "📋 复制SSH密钥到服务器..."
         echo "$SSH_KEY" | ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "cat > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa"
+        
+        # 配置Git SSH
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "echo 'Host github.com' > ~/.ssh/config"
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "echo '    HostName github.com' >> ~/.ssh/config"
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "echo '    User git' >> ~/.ssh/config"
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "echo '    IdentitiesOnly yes' >> ~/.ssh/config"
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "echo '    StrictHostKeyChecking no' >> ~/.ssh/config"
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "chmod 600 ~/.ssh/config"
         
         # 执行服务器端部署
         echo "🔧 开始服务器端部署..."
