@@ -137,30 +137,74 @@ jobs:
           
           # 初始化数据库
           echo "🗄️ 初始化云数据库..."
+          
+          # 安装数据库初始化所需依赖
+          echo "📦 安装数据库依赖..."
+          python3 -m pip install --user pymysql python-dotenv loguru 2>/dev/null || {
+            echo "⚠️ pip安装失败，尝试apt安装..."
+            apt-get update 2>/dev/null && apt-get install -y python3-pymysql python3-dotenv 2>/dev/null || true
+          }
+          
           if [ -f "scripts/init_database_sync.py" ]; then
             python3 scripts/init_database_sync.py || echo "⚠️ 数据库初始化失败，但继续部署"
           elif [ -f "scripts/init_database.py" ]; then
-            python3 -m pip install pymysql python-dotenv 2>/dev/null || true
             python3 scripts/init_database.py || echo "⚠️ 数据库初始化失败，但继续部署"
           fi
           
           # 构建镜像（多策略容错）
           echo "🏗️ 构建Docker镜像..."
           
+          # 检查Docker状态
+          echo "🔍 检查Docker环境..."
+          docker --version
+          docker info | head -10 || true
+          
           # 策略1：使用官方Python镜像
-          if docker build -f Dockerfile.simple -t mem0:latest . 2>/dev/null; then
+          echo "📝 尝试策略1: 官方Python镜像 (Dockerfile.simple)"
+          if docker build -f Dockerfile.simple -t mem0:latest . 2>docker_error1.log; then
             echo "✅ 使用官方Python镜像构建成功"
-          # 策略2：使用Ubuntu基础镜像
-          elif [ -f "Dockerfile.minimal" ] && docker build -f Dockerfile.minimal -t mem0:latest . 2>/dev/null; then
-            echo "✅ 使用Ubuntu基础镜像构建成功"
-          # 策略3：尝试使用默认Dockerfile
-          elif docker build -t mem0:latest . 2>/dev/null; then
-            echo "✅ 使用默认Dockerfile构建成功"
           else
-            echo "❌ 所有Docker构建策略都失败了"
-            echo "🔍 检查Docker环境和网络连接..."
-            docker version
-            exit 1
+            echo "❌ 策略1失败，错误信息:"
+            head -20 docker_error1.log 2>/dev/null || true
+            
+            # 策略2：使用Ubuntu基础镜像
+            echo "📝 尝试策略2: Ubuntu基础镜像 (Dockerfile.minimal)"
+            if [ -f "Dockerfile.minimal" ] && docker build -f Dockerfile.minimal -t mem0:latest . 2>docker_error2.log; then
+              echo "✅ 使用Ubuntu基础镜像构建成功"
+            else
+              echo "❌ 策略2失败，错误信息:"
+              head -20 docker_error2.log 2>/dev/null || true
+              
+              # 策略3：尝试使用本地构建版本（最小依赖）
+              echo "📝 尝试策略3: 本地构建版本 (Dockerfile.local)"
+              if [ -f "Dockerfile.local" ] && docker build -f Dockerfile.local -t mem0:latest . 2>docker_error3.log; then
+                echo "✅ 使用本地构建版本成功"
+              else
+                echo "❌ 策略3失败，错误信息:"
+                head -20 docker_error3.log 2>/dev/null || true
+                
+                # 策略4：尝试使用默认Dockerfile
+                echo "📝 尝试策略4: 默认Dockerfile"
+                if [ -f "Dockerfile" ] && docker build -t mem0:latest . 2>docker_error4.log; then
+                  echo "✅ 使用默认Dockerfile构建成功"
+                else
+                  echo "❌ 所有Docker构建策略都失败了"
+                  echo "🔍 错误信息汇总:"
+                  for i in 1 2 3 4; do
+                    if [ -f "docker_error${i}.log" ]; then
+                      echo "--- 策略${i}错误 ---"
+                      head -10 "docker_error${i}.log" 2>/dev/null || true
+                    fi
+                  done
+                  echo "🔍 系统状态:"
+                  df -h | head -5 2>/dev/null || true
+                  free -h 2>/dev/null || true
+                  echo "🔍 Docker状态:"
+                  docker system df 2>/dev/null || true
+                  exit 1
+                fi
+              fi
+            fi
           fi
           
           # 启动容器
