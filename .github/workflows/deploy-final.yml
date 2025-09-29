@@ -63,10 +63,10 @@ jobs:
         
         # 配置Docker国内镜像源
         echo "🌏 配置Docker国内镜像源..."
-        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'DOCKER_CONFIG'
-mkdir -p /etc/docker
-
-cat > /etc/docker/daemon.json << 'EOF'
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST '
+          mkdir -p /etc/docker
+          
+          cat > /etc/docker/daemon.json << "EOF"
 {
   "registry-mirrors": [
     "https://dockerproxy.com",
@@ -82,14 +82,14 @@ cat > /etc/docker/daemon.json << 'EOF'
   }
 }
 EOF
-
-echo "🔄 重启Docker服务..."
-systemctl daemon-reload
-systemctl restart docker
-
-echo "✅ Docker镜像源配置完成"
-docker info | grep -A 10 "Registry Mirrors" || true
-DOCKER_CONFIG
+          
+          echo "🔄 重启Docker服务..."
+          systemctl daemon-reload
+          systemctl restart docker
+          
+          echo "✅ Docker镜像源配置完成"
+          docker info | grep -A 10 "Registry Mirrors" || true
+        '
         
         # 停止旧容器
         echo "🛑 停止旧容器..."
