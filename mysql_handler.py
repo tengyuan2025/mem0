@@ -24,32 +24,7 @@ class MySQLHandler:
             return
             
         try:
-            # 尝试创建数据库（如果有权限）
-            try:
-                temp_pool = await aiomysql.create_pool(
-                    host=os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
-                    port=int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
-                    user=os.getenv('DATABASE_USER', os.getenv('MYSQL_USER', 'root')),
-                    password=os.getenv('DATABASE_PASSWORD', os.getenv('MYSQL_PASSWORD', '123456')),
-                    charset='utf8mb4',
-                    autocommit=True,
-                    minsize=1,
-                    maxsize=10
-                )
-                
-                # 创建数据库（如果不存在）
-                await self._ensure_database_with_pool(temp_pool)
-                
-                # 关闭临时连接池
-                temp_pool.close()
-                await temp_pool.wait_closed()
-            except aiomysql.Error as e:
-                if "Access denied" in str(e):
-                    logger.warning("无CREATE DATABASE权限（阿里云RDS模式），假设数据库已存在")
-                else:
-                    raise
-            
-            # 创建连接到指定数据库的连接池
+            # 直接连接到指定数据库（阿里云RDS数据库已预先创建）
             self.pool = await aiomysql.create_pool(
                 host=os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
                 port=int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
@@ -70,33 +45,6 @@ class MySQLHandler:
             
         except Exception as e:
             logger.error(f"MySQL连接池初始化失败: {e}")
-            raise
-    
-    async def _ensure_database_with_pool(self, pool):
-        """使用指定连接池确保数据库存在"""
-        try:
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    # 创建数据库（如果不存在）
-                    db_name = os.getenv('DATABASE_NAME', os.getenv('MYSQL_DATABASE', 'mem0'))
-                    await cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                    logger.info(f"确保数据库 {db_name} 存在")
-        except Exception as e:
-            logger.error(f"创建数据库失败: {e}")
-            raise
-
-    async def _ensure_database(self):
-        """确保数据库存在（使用当前连接池）"""
-        try:
-            async with self.pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    # 创建数据库（如果不存在）
-                    db_name = os.getenv('DATABASE_NAME', os.getenv('MYSQL_DATABASE', 'mem0'))
-                    await cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                    await cursor.execute(f"USE {db_name}")
-                    logger.info(f"确保数据库 {db_name} 存在")
-        except Exception as e:
-            logger.error(f"创建数据库失败: {e}")
             raise
     
     async def _ensure_table(self):

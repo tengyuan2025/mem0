@@ -30,15 +30,13 @@ async def init_database():
     logger.info(f"开始初始化数据库: {config['host']}:{config['port']}")
     
     try:
-        # 连接到MySQL服务器（不指定数据库）
+        # 直接连接到指定数据库（阿里云RDS数据库已预先创建）
+        config['db'] = db_name
+        logger.info(f"连接到数据库: {db_name}")
         conn = await aiomysql.connect(**config)
         
         try:
             async with conn.cursor() as cursor:
-                # 创建数据库
-                logger.info(f"创建数据库: {db_name}")
-                await cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                await cursor.execute(f"USE {db_name}")
                 
                 # 创建用户记忆表
                 logger.info("创建用户记忆表...")
