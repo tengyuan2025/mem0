@@ -100,8 +100,11 @@ jobs:
           
           # 设置环境配置
           echo "⚙️ 配置环境..."
-          if [ -f ".env.server" ] && [ ! -f ".env" ]; then
+          if [ -f ".env.server" ]; then
+            echo "📝 使用服务器配置覆盖.env文件..."
             cp .env.server .env
+          else
+            echo "❌ .env.server文件不存在！"
           fi
           
           # 替换API密钥和数据库密钥
