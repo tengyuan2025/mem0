@@ -109,8 +109,8 @@ jobs:
           
           # 替换API密钥和数据库密钥
           if [ -f ".env" ]; then
-            if [ ! -z "${{ secrets.DEEPSEEK_API_KEY }}" ]; then
-              sed -i "s/\${DEEPSEEK_API_KEY}/${{ secrets.DEEPSEEK_API_KEY }}/g" .env 2>/dev/null || true
+            if [ ! -z "${{ secrets.DEEPSEEK_APIKEY }}" ]; then
+              sed -i "s/\${DEEPSEEK_APIKEY}/${{ secrets.DEEPSEEK_APIKEY }}/g" .env 2>/dev/null || true
             fi
             if [ ! -z "${{ secrets.OPENAI_API_KEY }}" ]; then
               sed -i "s/\${OPENAI_API_KEY}/${{ secrets.OPENAI_API_KEY }}/g" .env 2>/dev/null || true
