@@ -117,20 +117,32 @@ jobs:
             fi
             if [ ! -z "${{ secrets.DATABASE_HOST }}" ]; then
               sed -i "s/\${DATABASE_HOST}/${{ secrets.DATABASE_HOST }}/g" .env 2>/dev/null || true
+            else
+              echo "❌ DATABASE_HOST未在GitHub Secrets中设置！"
             fi
             if [ ! -z "${{ secrets.DATABASE_PORT }}" ]; then
               sed -i "s/\${DATABASE_PORT}/${{ secrets.DATABASE_PORT }}/g" .env 2>/dev/null || true
+            else
+              echo "⚠️ DATABASE_PORT未设置，使用默认值3306"
+              sed -i "s/\${DATABASE_PORT}/3306/g" .env 2>/dev/null || true
             fi
             if [ ! -z "${{ secrets.DATABASE_NAME }}" ]; then
               sed -i "s/\${DATABASE_NAME}/${{ secrets.DATABASE_NAME }}/g" .env 2>/dev/null || true
+            else
+              echo "⚠️ DATABASE_NAME未设置，使用默认值mem0"
+              sed -i "s/\${DATABASE_NAME}/mem0/g" .env 2>/dev/null || true
             fi
             if [ ! -z "${{ secrets.DATABASE_USER }}" ]; then
               sed -i "s/\${DATABASE_USER}/${{ secrets.DATABASE_USER }}/g" .env 2>/dev/null || true
+            else
+              echo "❌ DATABASE_USER未在GitHub Secrets中设置！"
             fi
             if [ ! -z "${{ secrets.DATABASE_PASSWORD }}" ]; then
               # 需要转义特殊字符
               DB_PASS=$(echo "${{ secrets.DATABASE_PASSWORD }}" | sed 's/[[\.*^$()+?{|]/\\&/g')
               sed -i "s/\${DATABASE_PASSWORD}/$DB_PASS/g" .env 2>/dev/null || true
+            else
+              echo "❌ DATABASE_PASSWORD未在GitHub Secrets中设置！"
             fi
             
             # 生成API密钥
@@ -142,6 +154,16 @@ jobs:
             # 调试：显示替换后的结果
             echo "📋 环境变量替换后的.env内容（数据库相关）："
             grep -E "DATABASE_|MYSQL_|ENABLE_MYSQL" .env || echo "没有找到数据库配置"
+            
+            # 检查是否还有未替换的占位符
+            echo ""
+            echo "🔍 检查未替换的占位符："
+            if grep -q "\${DATABASE_" .env; then
+              echo "⚠️ 发现未替换的数据库配置占位符："
+              grep "\${DATABASE_" .env
+            else
+              echo "✅ 所有数据库配置占位符已替换"
+            fi
           else
             echo "❌ .env文件不存在，无法替换环境变量！"
           fi
