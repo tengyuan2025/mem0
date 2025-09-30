@@ -292,126 +292,76 @@ class MemoryManager:
         logger.info(f"LLM客户端初始化成功: {llm_provider}")
     
     async def _init_embedding_client(self):
-        """初始化Embedding客户端"""
-        embedding_provider = os.getenv("MEM0_EMBEDDER_PROVIDER", os.getenv("EMBEDDING_PROVIDER", "dashscope"))
-        logger.info(f"开始初始化Embedding客户端: {embedding_provider}")
+        """初始化本地Embedding客户端"""
+        logger.info("开始初始化本地Embedding客户端")
         
-        if embedding_provider == "dashscope":
-            # 阿里云通义千问 Embedding
-            from dashscope import TextEmbedding
-            self.embedding_client = TextEmbedding
-            self.embedding_model = os.getenv("DASHSCOPE_EMBEDDING_MODEL", "text-embedding-v3")
-            
-        elif embedding_provider == "qianfan":
-            # 百度文心 Embedding
-            import qianfan
-            self.embedding_client = qianfan.Embedding()
-            self.embedding_model = os.getenv("QIANFAN_EMBEDDING_MODEL", "Embedding-V1")
-            
-        elif embedding_provider == "zhipu":
-            # 智谱AI Embedding
-            from zhipuai import ZhipuAI
-            self.embedding_client = ZhipuAI(api_key=os.getenv("ZHIPUAI_API_KEY"))
-            self.embedding_model = os.getenv("ZHIPUAI_EMBEDDING_MODEL", "embedding-3")
-            
-        elif embedding_provider == "local_huggingface" or embedding_provider == "huggingface":
-            # HuggingFace 本地模型
-            from sentence_transformers import SentenceTransformer
-            self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", os.getenv("HF_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"))
-            
-            # 处理模型加载错误
+        # 只支持本地SentenceTransformers模型
+        from sentence_transformers import SentenceTransformer
+        
+        # 获取模型名称
+        self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+        
+        # 候选模型列表（按优先级排序）
+        candidate_models = [
+            self.embedding_model,  # 用户指定的模型
+            "shibing624/text2vec-base-chinese",  # 中文模型
+            "paraphrase-multilingual-MiniLM-L12-v2",  # 多语言模型
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # 完整路径
+            "all-MiniLM-L6-v2",  # 更小的模型
+        ]
+        
+        # 设置缓存目录
+        cache_dir = os.getenv("HF_HOME", "./data/huggingface") 
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        # 尝试加载模型
+        model_loaded = False
+        for model_name in candidate_models:
             try:
-                logger.info(f"尝试加载HuggingFace模型: {self.embedding_model}")
+                logger.info(f"尝试加载模型: {model_name}")
                 
-                # 设置缓存目录
-                cache_dir = os.getenv("HF_HOME", "./data/huggingface")
-                os.makedirs(cache_dir, exist_ok=True)
-                
-                # 尝试加载模型
-                self.embedding_client = SentenceTransformer(
-                    self.embedding_model, 
-                    cache_folder=cache_dir,
-                    device='cpu'  # 明确指定使用CPU
-                )
-                logger.info(f"✅ 成功加载HuggingFace模型: {self.embedding_model}")
-                
-            except Exception as e:
-                logger.warning(f"⚠️ 无法加载模型 {self.embedding_model}: {e}")
-                
-                # 回退到更可靠的模型
-                fallback_model = "paraphrase-multilingual-MiniLM-L12-v2"
-                logger.info(f"尝试回退模型: {fallback_model}")
-                
+                # 先尝试离线模式加载
                 try:
-                    self.embedding_model = fallback_model
                     self.embedding_client = SentenceTransformer(
-                        self.embedding_model,
+                        model_name, 
                         cache_folder=cache_dir,
-                        device='cpu'
+                        device='cpu',
+                        local_files_only=True  # 强制使用本地文件
                     )
-                    logger.info(f"✅ 成功加载回退模型: {self.embedding_model}")
-                except Exception as e2:
-                    logger.error(f"❌ 无法加载回退模型: {e2}")
-                    raise RuntimeError(f"无法初始化Embedding模型: {e2}")
-            
-        elif embedding_provider == "sentence_transformers":
-            # Sentence Transformers 本地模型
-            from sentence_transformers import SentenceTransformer
-            self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", os.getenv("ST_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"))
-            
-            # 处理模型加载错误
-            try:
-                logger.info(f"尝试加载Embedding模型: {self.embedding_model}")
-                
-                # 设置缓存目录
-                cache_dir = os.getenv("HF_HOME", "./data/huggingface")
-                os.makedirs(cache_dir, exist_ok=True)
-                
-                # 尝试加载模型
-                self.embedding_client = SentenceTransformer(
-                    self.embedding_model, 
-                    cache_folder=cache_dir,
-                    device='cpu'  # 明确指定使用CPU
-                )
-                logger.info(f"✅ 成功加载Embedding模型: {self.embedding_model}")
-                
+                    self.embedding_model = model_name
+                    logger.info(f"✅ 离线模式成功加载模型: {model_name}")
+                    model_loaded = True
+                    break
+                except Exception as e1:
+                    logger.debug(f"离线模式失败 {model_name}: {e1}")
+                    
+                    # 如果离线失败，尝试在线模式（仅对简单模型名）
+                    if "/" not in model_name or model_name.startswith("sentence-transformers/"):
+                        try:
+                            self.embedding_client = SentenceTransformer(
+                                model_name, 
+                                cache_folder=cache_dir,
+                                device='cpu'
+                            )
+                            self.embedding_model = model_name
+                            logger.info(f"✅ 在线模式成功加载模型: {model_name}")
+                            model_loaded = True
+                            break
+                        except Exception as e2:
+                            logger.debug(f"在线模式也失败 {model_name}: {e2}")
+                            continue
+                    
             except Exception as e:
-                logger.warning(f"⚠️ 无法加载模型 {self.embedding_model}: {e}")
-                
-                # 回退到更可靠的模型
-                fallback_model = "paraphrase-multilingual-MiniLM-L12-v2"
-                logger.info(f"尝试回退模型: {fallback_model}")
-                
-                try:
-                    self.embedding_model = fallback_model
-                    self.embedding_client = SentenceTransformer(
-                        self.embedding_model,
-                        cache_folder=cache_dir,
-                        device='cpu'
-                    )
-                    logger.info(f"✅ 成功加载回退模型: {self.embedding_model}")
-                except Exception as e2:
-                    logger.error(f"❌ 无法加载回退模型: {e2}")
-                    raise RuntimeError(f"无法初始化Embedding模型: {e2}")
-            
-        elif embedding_provider == "openai":
-            # OpenAI Embedding
-            from openai import OpenAI
-            self.embedding_client = OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
-            self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
-            
-        elif embedding_provider == "local_openai":
-            # 本地OpenAI兼容API (如Ollama)
-            from openai import OpenAI
-            self.embedding_client = OpenAI(
-                base_url=os.getenv("LOCAL_EMBEDDING_URL", "http://localhost:11434/v1"),
-                api_key="local"  # 本地不需要真实密钥
-            )
-            self.embedding_model = os.getenv("LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
-            
-        logger.info(f"Embedding客户端初始化成功: {embedding_provider}")
+                logger.debug(f"加载模型失败 {model_name}: {e}")
+                continue
+        
+        if not model_loaded:
+            # 如果所有模型都无法加载，直接抛出异常
+            error_msg = f"❌ 无法加载任何嵌入模型，尝试的模型: {candidate_models}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        
+        logger.info(f"本地Embedding客户端初始化完成: {self.embedding_model}")
     
     async def add_memory(self, messages: List[MessageItem], metadata: Dict = None) -> Dict:
         """为每个用户单独添加记忆"""
@@ -986,58 +936,14 @@ class MemoryManager:
         return dimensions
     
     async def _generate_embedding(self, text: str) -> List[float]:
-        """生成文本的embedding"""
-        provider = os.getenv("MEM0_EMBEDDER_PROVIDER", os.getenv("EMBEDDING_PROVIDER", "dashscope"))
-        
-        if provider == "dashscope":
-            from dashscope import TextEmbedding
-            
-            response = TextEmbedding.call(
-                model=self.embedding_model,
-                input=text,
-                api_key=os.getenv("DASHSCOPE_API_KEY")
-            )
-            
-            if response.status_code == 200:
-                return response.output["embeddings"][0]["embedding"]
-            else:
-                raise Exception(f"Embedding生成失败: {response}")
-                
-        elif provider == "qianfan":
-            # 百度文心 Embedding
-            response = self.embedding_client.do(model=self.embedding_model, texts=[text])
-            return response["body"]["data"][0]["embedding"]
-            
-        elif provider == "zhipu":
-            # 智谱AI Embedding
-            response = self.embedding_client.embeddings.create(
-                model=self.embedding_model,
-                input=text
-            )
-            return response.data[0].embedding
-            
-        elif provider in ["local_huggingface", "sentence_transformers", "huggingface"]:
-            # 本地 Sentence Transformers 模型
+        """使用本地模型生成文本的embedding"""
+        try:
+            # 使用本地 SentenceTransformers 模型
             embeddings = self.embedding_client.encode([text], convert_to_tensor=False)
             return embeddings[0].tolist()
-            
-        elif provider == "openai":
-            # OpenAI Embedding
-            response = self.embedding_client.embeddings.create(
-                model=self.embedding_model,
-                input=text
-            )
-            return response.data[0].embedding
-            
-        elif provider == "local_openai":
-            # 本地 OpenAI 兼容 API
-            response = self.embedding_client.embeddings.create(
-                model=self.embedding_model,
-                input=text
-            )
-            return response.data[0].embedding
-        
-        return []
+        except Exception as e:
+            logger.error(f"生成embedding失败: {e}")
+            raise RuntimeError(f"无法生成embedding: {e}")
     
     async def _call_llm(self, prompt: str) -> str:
         """调用LLM"""

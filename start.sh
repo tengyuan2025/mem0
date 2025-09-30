@@ -276,8 +276,8 @@ case $choice in
                 echo "💾 MySQL:        未启用"
             fi
             echo "🗂️  ChromaDB:     本地持久化存储"
-            echo "🤖 LLM Provider: $(grep "^LLM_PROVIDER=" .env 2>/dev/null | cut -d'=' -f2 | head -1)"
-            echo "🔤 Embedding:    $(grep "^EMBEDDING_PROVIDER=" .env 2>/dev/null | cut -d'=' -f2 | head -1)"
+            echo "🤖 LLM Provider: $(grep "^MEM0_LLM_PROVIDER=" .env 2>/dev/null | cut -d'=' -f2 | head -1)"
+            echo "🔤 Embedding:    $(grep "^MEM0_EMBEDDER_MODEL=" .env 2>/dev/null | cut -d'=' -f2 | head -1)"
             echo ""
             
             echo "=========================================="
