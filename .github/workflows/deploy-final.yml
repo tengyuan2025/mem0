@@ -57,43 +57,13 @@ jobs:
         echo "🔍 测试SSH连接..."
         ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 $SSH_USER@$SSH_HOST "echo '✅ SSH连接成功'"
         
-        # 检查Docker
-        echo "🐳 检查Docker环境..."
-        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker --version"
+        # 检查Python环境
+        echo "🐍 检查Python环境..."
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "python3 --version && pip3 --version"
         
-        # 配置Docker国内镜像源
-        echo "🌏 配置Docker国内镜像源..."
-        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST '
-          mkdir -p /etc/docker
-          
-          cat > /etc/docker/daemon.json << "EOF"
-{
-  "registry-mirrors": [
-    "https://dockerproxy.com",
-    "https://hub-mirror.c.163.com",
-    "https://mirror.baidubce.com",
-    "https://ccr.ccs.tencentyun.com"
-  ],
-  "insecure-registries": [],
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "10m",
-    "max-file": "3"
-  }
-}
-EOF
-          
-          echo "🔄 重启Docker服务..."
-          systemctl daemon-reload
-          systemctl restart docker
-          
-          echo "✅ Docker镜像源配置完成"
-          docker info | grep -A 10 "Registry Mirrors" || true
-        '
-        
-        # 停止旧容器
-        echo "🛑 停止旧容器..."
-        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "docker stop mem0-api 2>/dev/null || true; docker rm mem0-api 2>/dev/null || true"
+        # 停止旧服务
+        echo "🛑 停止旧服务..."
+        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "pkill -f 'uvicorn app:app' 2>/dev/null || true"
         
         # 使用git pull更新代码
         echo "🔄 使用git方式更新服务器代码..."
@@ -191,72 +161,40 @@ EOF
             python3 scripts/init_database.py || echo "⚠️ 数据库初始化失败，但继续部署"
           fi
           
-          # 构建镜像（多策略容错）
-          echo "🏗️ 构建Docker镜像..."
+          # 安装Python依赖
+          echo "📦 安装Python依赖..."
           
-          # 检查Docker状态
-          echo "🔍 检查Docker环境..."
-          docker --version
-          docker info | head -10 || true
+          # 创建必要的目录
+          mkdir -p logs data/chroma data/huggingface data/transformers
           
-          # 策略1：使用官方Python镜像
-          echo "📝 尝试策略1: 官方Python镜像 (Dockerfile.simple)"
-          if docker build -f Dockerfile.simple -t mem0:latest . 2>docker_error1.log; then
-            echo "✅ 使用官方Python镜像构建成功"
-          else
-            echo "❌ 策略1失败，错误信息:"
-            head -20 docker_error1.log 2>/dev/null || true
-            
-            # 策略2：使用Ubuntu基础镜像
-            echo "📝 尝试策略2: Ubuntu基础镜像 (Dockerfile.minimal)"
-            if [ -f "Dockerfile.minimal" ] && docker build -f Dockerfile.minimal -t mem0:latest . 2>docker_error2.log; then
-              echo "✅ 使用Ubuntu基础镜像构建成功"
-            else
-              echo "❌ 策略2失败，错误信息:"
-              head -20 docker_error2.log 2>/dev/null || true
-              
-              # 策略3：尝试使用本地构建版本（最小依赖）
-              echo "📝 尝试策略3: 本地构建版本 (Dockerfile.local)"
-              if [ -f "Dockerfile.local" ] && docker build -f Dockerfile.local -t mem0:latest . 2>docker_error3.log; then
-                echo "✅ 使用本地构建版本成功"
-              else
-                echo "❌ 策略3失败，错误信息:"
-                head -20 docker_error3.log 2>/dev/null || true
-                
-                # 策略4：尝试使用默认Dockerfile
-                echo "📝 尝试策略4: 默认Dockerfile"
-                if [ -f "Dockerfile" ] && docker build -t mem0:latest . 2>docker_error4.log; then
-                  echo "✅ 使用默认Dockerfile构建成功"
-                else
-                  echo "❌ 所有Docker构建策略都失败了"
-                  echo "🔍 错误信息汇总:"
-                  for i in 1 2 3 4; do
-                    if [ -f "docker_error${i}.log" ]; then
-                      echo "--- 策略${i}错误 ---"
-                      head -10 "docker_error${i}.log" 2>/dev/null || true
-                    fi
-                  done
-                  echo "🔍 系统状态:"
-                  df -h | head -5 2>/dev/null || true
-                  free -h 2>/dev/null || true
-                  echo "🔍 Docker状态:"
-                  docker system df 2>/dev/null || true
-                  exit 1
-                fi
-              fi
-            fi
+          # 升级pip并安装依赖
+          python3 -m pip install --upgrade pip
+          
+          # 安装核心依赖
+          echo "📝 安装核心依赖..."
+          python3 -m pip install fastapi uvicorn[standard] pydantic python-dotenv pymysql sqlalchemy loguru
+          
+          # 尝试安装完整依赖
+          echo "📝 安装完整依赖..."
+          if [ -f "requirements.txt" ]; then
+            python3 -m pip install -r requirements.txt || echo "⚠️ 部分依赖安装失败，但核心功能可用"
           fi
           
-          # 启动容器
-          echo "🚀 启动新容器..."
-          docker run -d \
-            --name mem0-api \
-            -p 8000:8000 \
-            --restart always \
-            --env-file .env \
-            -v /opt/mem0/data:/app/data \
-            -v /opt/mem0/logs:/app/logs \
-            mem0:latest
+          # 安装AI相关依赖（可选）
+          echo "📝 安装AI依赖..."
+          python3 -m pip install sentence-transformers chromadb 2>/dev/null || echo "⚠️ AI依赖安装失败，可能需要手动配置"
+          
+          # 启动Python应用
+          echo "🚀 启动Python应用..."
+          
+          # 设置环境变量
+          export $(cat .env | grep -v '^#' | xargs) 2>/dev/null || true
+          
+          # 后台启动应用
+          nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 > logs/app.log 2>&1 &
+          APP_PID=$!
+          echo "📝 应用进程ID: $APP_PID"
+          echo $APP_PID > mem0_app.pid
           
           # 健康检查
           echo "🔍 健康检查..."
@@ -264,16 +202,19 @@ EOF
           for i in {1..12}; do
             if curl -f http://localhost:8000/health 2>/dev/null; then
               echo "✅ 服务启动成功！"
-              docker ps | grep mem0-api
+              echo "📝 进程状态:"
+              ps aux | grep "uvicorn app:app" | grep -v grep || true
               break
             else
               echo "⏳ 等待服务启动... ($i/12)"
               sleep 5
               if [ $i -eq 12 ]; then
                 echo "⚠️ 健康检查超时，查看日志:"
-                docker logs --tail 20 mem0-api
-                echo "容器状态:"
-                docker ps -a | grep mem0-api
+                tail -30 logs/app.log 2>/dev/null || echo "日志文件不存在"
+                echo "📝 进程状态:"
+                ps aux | grep "uvicorn" | grep -v grep || echo "未找到uvicorn进程"
+                echo "📝 端口占用:"
+                netstat -tlnp | grep :8000 || ss -tlnp | grep :8000 || echo "端口8000未被占用"
               fi
             fi
           done
