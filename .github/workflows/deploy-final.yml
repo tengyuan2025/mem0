@@ -321,8 +321,33 @@ jobs:
             echo "🎉 嵌入模型下载成功，继续部署..."
           fi
           
-          # 启动Python应用
-          echo "🚀 启动Python应用..."
+          # 重启Python应用
+          echo "🚀 重启Python应用..."
+          
+          # 先停止现有服务
+          echo "🛑 停止现有服务..."
+          if [ -f "mem0_app.pid" ]; then
+            OLD_PID=$(cat mem0_app.pid)
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+              echo "📝 停止旧进程: $OLD_PID"
+              kill "$OLD_PID" || true
+              sleep 3
+              # 如果进程还在运行，强制杀死
+              if kill -0 "$OLD_PID" 2>/dev/null; then
+                echo "📝 强制停止进程: $OLD_PID"
+                kill -9 "$OLD_PID" || true
+              fi
+            else
+              echo "📝 PID文件存在但进程已不存在"
+            fi
+            rm -f mem0_app.pid
+          fi
+          
+          # 查找并停止所有可能的mem0相关进程
+          echo "📝 查找并停止所有mem0相关进程..."
+          pkill -f "uvicorn app:app" 2>/dev/null || echo "📝 没有找到uvicorn进程"
+          pkill -f "python.*app\.py" 2>/dev/null || echo "📝 没有找到python app.py进程"
+          sleep 2
           
           # 确保日志目录存在
           mkdir -p logs
