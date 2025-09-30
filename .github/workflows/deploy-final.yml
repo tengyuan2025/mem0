@@ -273,14 +273,52 @@ jobs:
           echo "🔧 配置HuggingFace镜像..."
           export HF_ENDPOINT=https://hf-mirror.com
           
-          # 下载中文嵌入模型
-          echo "📥 下载中文嵌入模型..."
+          # 强制下载中文嵌入模型（必须成功）
+          echo "📥 下载中文嵌入模型（必须成功）..."
+          MODEL_DOWNLOAD_SUCCESS=false
+          
+          # 方案1：使用项目自带脚本
           if [ -f "download_chinese_model.py" ]; then
-            echo "使用项目自带的模型下载脚本..."
-            python3 download_chinese_model.py || echo "⚠️ 中文模型下载失败，运行时会自动重试"
+            echo "📝 方案1：使用项目自带的模型下载脚本..."
+            if python3 download_chinese_model.py; then
+              echo "✅ 方案1成功：项目脚本下载完成"
+              MODEL_DOWNLOAD_SUCCESS=true
+            else
+              echo "❌ 方案1失败：项目脚本下载失败"
+            fi
           else
-            echo "尝试简单的模型预热..."
-            python3 -c "from sentence_transformers import SentenceTransformer; import os; SentenceTransformer('shibing624/text2vec-base-chinese', cache_folder=os.getenv('HF_HOME', './data/huggingface'), device='cpu')" || echo "⚠️ 模型预下载失败，运行时会自动重试"
+            echo "📝 项目自带脚本不存在，跳过方案1"
+          fi
+          
+          # 方案2：如果方案1失败，尝试直接下载主模型
+          if [ "$MODEL_DOWNLOAD_SUCCESS" = "false" ]; then
+            echo "📝 方案2：直接下载shibing624/text2vec-base-chinese..."
+            if python3 -c "from sentence_transformers import SentenceTransformer; import os; SentenceTransformer('shibing624/text2vec-base-chinese', cache_folder=os.getenv('HF_HOME', './data/huggingface'), device='cpu'); print('✅ 主模型下载成功')"; then
+              echo "✅ 方案2成功：主模型下载完成"
+              MODEL_DOWNLOAD_SUCCESS=true
+            else
+              echo "❌ 方案2失败：主模型下载失败"
+            fi
+          fi
+          
+          # 方案3：如果前面都失败，尝试备用模型
+          if [ "$MODEL_DOWNLOAD_SUCCESS" = "false" ]; then
+            echo "📝 方案3：下载备用模型paraphrase-multilingual-MiniLM-L12-v2..."
+            if python3 -c "from sentence_transformers import SentenceTransformer; import os; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', cache_folder=os.getenv('HF_HOME', './data/huggingface'), device='cpu'); print('✅ 备用模型下载成功')"; then
+              echo "✅ 方案3成功：备用模型下载完成"
+              MODEL_DOWNLOAD_SUCCESS=true
+            else
+              echo "❌ 方案3失败：备用模型下载失败"
+            fi
+          fi
+          
+          # 检查是否有任何模型下载成功
+          if [ "$MODEL_DOWNLOAD_SUCCESS" = "false" ]; then
+            echo "💥 所有模型下载方案都失败！部署终止。"
+            echo "请检查网络连接和HuggingFace镜像配置。"
+            exit 1
+          else
+            echo "🎉 嵌入模型下载成功，继续部署..."
           fi
           
           # 启动Python应用
