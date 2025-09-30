@@ -35,7 +35,9 @@ import json
 from mysql_handler import MySQLHandler
 
 # 加载环境变量
-load_dotenv()
+# 首先加载 .env 文件，然后加载 .env.local 文件（如果存在）覆盖配置
+load_dotenv()  # 加载 .env
+load_dotenv('.env.local', override=True)  # 加载 .env.local 并覆盖同名变量
 
 # 配置日志
 logger.remove()
