@@ -126,12 +126,8 @@ jobs:
               echo "⚠️ DATABASE_PORT未设置，使用默认值3306"
               sed -i "s/\${DATABASE_PORT}/3306/g" .env 2>/dev/null || true
             fi
-            if [ ! -z "${{ secrets.DATABASE_NAME }}" ]; then
-              sed -i "s/\${DATABASE_NAME}/${{ secrets.DATABASE_NAME }}/g" .env 2>/dev/null || true
-            else
-              echo "⚠️ DATABASE_NAME未设置，使用默认值mem0"
-              sed -i "s/\${DATABASE_NAME}/mem0/g" .env 2>/dev/null || true
-            fi
+            # DATABASE_NAME 现在使用 DATABASE_USER 的值
+            # 不需要单独的 DATABASE_NAME 替换
             if [ ! -z "${{ secrets.DATABASE_USER }}" ]; then
               sed -i "s/\${DATABASE_USER}/${{ secrets.DATABASE_USER }}/g" .env 2>/dev/null || true
             else
