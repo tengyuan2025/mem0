@@ -262,7 +262,7 @@ class HealthChecker:
         print("🌐 检查API服务...")
         
         host = self.config.get('APP_HOST', '0.0.0.0')
-        port = self.config.get('APP_PORT', '8000')
+        port = self.config.get('APP_PORT', '9000')
         
         # 如果host是0.0.0.0，改为localhost进行测试
         test_host = 'localhost' if host == '0.0.0.0' else host

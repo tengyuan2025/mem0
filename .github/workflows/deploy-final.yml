@@ -272,8 +272,8 @@ jobs:
           fi
           
           # 后台启动应用
-          echo "📝 启动命令: python3 -m uvicorn app:app --host 0.0.0.0 --port 8000"
-          nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 > logs/app.log 2>&1 &
+          echo "📝 启动命令: python3 -m uvicorn app:app --host 0.0.0.0 --port 9000"
+          nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 &
           APP_PID=$!
           echo "📝 应用进程ID: $APP_PID"
           echo $APP_PID > mem0_app.pid
@@ -282,7 +282,7 @@ jobs:
           echo "🔍 健康检查..."
           sleep 10
           for i in {1..12}; do
-            if curl -f http://localhost:8000/health 2>/dev/null; then
+            if curl -f http://localhost:9000/health 2>/dev/null; then
               echo "✅ 服务启动成功！"
               echo "📝 进程状态:"
               ps aux | grep "uvicorn app:app" | grep -v grep || true
@@ -296,7 +296,7 @@ jobs:
                 echo "📝 进程状态:"
                 ps aux | grep "uvicorn" | grep -v grep || echo "未找到uvicorn进程"
                 echo "📝 端口占用:"
-                netstat -tlnp | grep :8000 || ss -tlnp | grep :8000 || echo "端口8000未被占用"
+                netstat -tlnp | grep :9000 || ss -tlnp | grep :9000 || echo "端口9000未被占用"
               fi
             fi
           done
@@ -305,5 +305,5 @@ jobs:
         DEPLOY_SCRIPT
         
         echo "✅ 部署任务完成！"
-        echo "🌐 服务地址: http://$SSH_HOST:8000"
-        echo "📚 API文档: http://$SSH_HOST:8000/docs"
+        echo "🌐 服务地址: http://$SSH_HOST:9000"
+        echo "📚 API文档: http://$SSH_HOST:9000/docs"

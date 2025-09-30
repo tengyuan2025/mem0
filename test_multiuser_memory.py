@@ -6,7 +6,7 @@ import requests
 import json
 
 # 配置
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:9000"
 API_TOKEN = "your-secret-key-change-this"  # 需要与.env中的API_SECRET_KEY一致
 
 headers = {

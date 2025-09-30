@@ -14,17 +14,17 @@ python app_china.py
 
 #### 🔥 **Swagger UI 交互式文档 (推荐)**
 ```
-http://localhost:8000/docs
+http://localhost:9000/docs
 ```
 
 #### 📄 **ReDoc 文档**
 ```
-http://localhost:8000/redoc
+http://localhost:9000/redoc
 ```
 
 #### 🔧 **OpenAPI JSON Schema**
 ```
-http://localhost:8000/openapi.json
+http://localhost:9000/openapi.json
 ```
 
 ---
@@ -203,12 +203,12 @@ Authorization: Bearer your-secret-key-change-this
 
 #### 1. 健康检查
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:9000/health
 ```
 
 #### 2. 添加记忆
 ```bash
-curl -X POST "http://localhost:8000/api/v1/memories/add" \
+curl -X POST "http://localhost:9000/api/v1/memories/add" \
   -H "Authorization: Bearer your-secret-key-change-this" \
   -H "Content-Type: application/json" \
   -d '{
@@ -223,7 +223,7 @@ curl -X POST "http://localhost:8000/api/v1/memories/add" \
 
 #### 3. 搜索记忆
 ```bash
-curl -X POST "http://localhost:8000/api/v1/memories/search" \
+curl -X POST "http://localhost:9000/api/v1/memories/search" \
   -H "Authorization: Bearer your-secret-key-change-this" \
   -H "Content-Type: application/json" \
   -d '{
@@ -235,7 +235,7 @@ curl -X POST "http://localhost:8000/api/v1/memories/search" \
 
 #### 4. 智能对话
 ```bash
-curl -X POST "http://localhost:8000/api/v1/chat" \
+curl -X POST "http://localhost:9000/api/v1/chat" \
   -H "Authorization: Bearer your-secret-key-change-this" \
   -H "Content-Type: application/json" \
   -d '{
@@ -299,11 +299,11 @@ curl -X POST "http://localhost:8000/api/v1/chat" \
 
 ## 🔗 快速链接
 
-- 🌐 **Swagger UI**: http://localhost:8000/docs
-- 📄 **ReDoc**: http://localhost:8000/redoc
-- 🏠 **服务首页**: http://localhost:8000/
-- ❤️ **健康检查**: http://localhost:8000/health
+- 🌐 **Swagger UI**: http://localhost:9000/docs
+- 📄 **ReDoc**: http://localhost:9000/redoc
+- 🏠 **服务首页**: http://localhost:9000/
+- ❤️ **健康检查**: http://localhost:9000/health
 
 ---
 
-**🎉 开始使用吧！在浏览器中打开 `http://localhost:8000/docs` 体验完整的交互式API文档！**
+**🎉 开始使用吧！在浏览器中打开 `http://localhost:9000/docs` 体验完整的交互式API文档！**

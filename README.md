@@ -233,7 +233,7 @@ Content-Type: application/json
 }
 ```
 
-完整的API文档可在服务启动后访问：http://localhost:8000/docs
+完整的API文档可在服务启动后访问：http://localhost:9000/docs
 
 ## 🚢 部署到阿里云
 
@@ -241,7 +241,7 @@ Content-Type: application/json
 
 - ECS实例：4核8G或以上
 - 操作系统：Ubuntu 20.04/22.04 或 CentOS 7/8
-- 开放端口：8000（API）、8001（ChromaDB，可选）
+- 开放端口：9000（API）、8001（ChromaDB，可选）
 
 ### 2. 安装Docker
 
@@ -286,7 +286,7 @@ server {
     server_name your-domain.com;
 
     location / {
-        proxy_pass http://localhost:8000;
+        proxy_pass http://localhost:9000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -347,7 +347,7 @@ docker-compose up -d
 
 检查端口占用：
 ```bash
-sudo lsof -i :8000
+sudo lsof -i :9000
 sudo lsof -i :8001
 ```
 
@@ -371,7 +371,7 @@ curl http://localhost:8001/api/v1/heartbeat
 
 编辑 `Dockerfile`，修改启动命令：
 ```dockerfile
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "4"]
 ```
 
 ### 2. 配置Redis缓存

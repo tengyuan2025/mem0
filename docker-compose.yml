@@ -51,12 +51,12 @@ services:
     volumes:
       - chroma_data:/chroma/data
     ports:
-      - "8001:8000"
+      - "8001:9000"
     networks:
       - mem0-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/api/v1/heartbeat"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -98,10 +98,10 @@ services:
       - DATABASE_URL=postgresql://mem0:password@postgres:5432/mem0_db
       - REDIS_HOST=redis
       - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8000
+      - CHROMA_PORT=9000
       - NEO4J_URI=bolt://neo4j:7687
     ports:
-      - "8000:8000"
+      - "9000:9000"
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
@@ -116,7 +116,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 30s
       timeout: 10s
       retries: 3

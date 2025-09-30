@@ -17,7 +17,7 @@ import time
 from typing import Dict, Any
 
 # API配置
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://localhost:9000"
 API_KEY = "your-secret-key-change-this"  # 需要与.env中的API_SECRET_KEY一致
 
 # 测试用户
@@ -288,7 +288,7 @@ def main():
         print("\n❌ 无法连接到API服务")
         print("请确保服务已启动：")
         print("1. 运行 ./start.sh")
-        print("2. 检查服务是否在 http://localhost:8000 运行")
+        print("2. 检查服务是否在 http://localhost:9000 运行")
         
     except AssertionError as e:
         print(f"\n❌ 测试失败: {e}")

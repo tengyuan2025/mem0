@@ -176,8 +176,8 @@ case $choice in
         echo "✅ 所有服务已启动！"
         echo ""
         echo "服务访问地址："
-        echo "- API服务: http://localhost:8000"
-        echo "- API文档: http://localhost:8000/docs"
+        echo "- API服务: http://localhost:9000"
+        echo "- API文档: http://localhost:9000/docs"
         echo "- ChromaDB: http://localhost:8001"
         echo "- Neo4j浏览器: http://localhost:7474"
         echo ""
@@ -261,9 +261,9 @@ case $choice in
             echo "=========================================="
             echo "           服务访问地址"
             echo "=========================================="
-            echo "🌐 API 服务:      http://localhost:8000"
-            echo "📖 API 文档:      http://localhost:8000/docs"
-            echo "🔧 健康检查:      http://localhost:8000/health"
+            echo "🌐 API 服务:      http://localhost:9000"
+            echo "📖 API 文档:      http://localhost:9000/docs"
+            echo "🔧 健康检查:      http://localhost:9000/health"
             echo ""
             
             # 显示配置信息
@@ -285,7 +285,7 @@ case $choice in
             echo "=========================================="
             echo "• 停止服务: 按 Ctrl+C"
             echo "• 查看日志: 服务运行中会显示实时日志"
-            echo "• 测试接口: curl http://localhost:8000/health"
+            echo "• 测试接口: curl http://localhost:9000/health"
             echo ""
             echo "🎉 服务已就绪，开始使用吧！"
             echo ""
@@ -421,7 +421,7 @@ case $choice in
         docker run -d \
             --name mem0-api \
             --env-file .env \
-            -p 8000:8000 \
+            -p 9000:9000 \
             -v $(pwd)/logs:/app/logs \
             -v $(pwd)/data:/app/data \
             --restart unless-stopped \
@@ -431,8 +431,8 @@ case $choice in
         echo "✅ API服务已启动！"
         echo ""
         echo "服务访问地址："
-        echo "- API服务: http://localhost:8000"
-        echo "- API文档: http://localhost:8000/docs"
+        echo "- API服务: http://localhost:9000"
+        echo "- API文档: http://localhost:9000/docs"
         echo ""
         echo "⚠️  注意：您需要单独配置和启动数据库服务"
         ;;

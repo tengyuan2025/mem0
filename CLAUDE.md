@@ -114,7 +114,7 @@ Primary endpoints with authentication via `Authorization: Bearer {token}`:
 - `POST /api/v1/memories/update` - Update existing memory
 - `POST /api/v1/memories/delete` - Delete memory by ID
 
-Full API documentation available at `http://localhost:8000/docs` when running.
+Full API documentation available at `http://localhost:9000/docs` when running.
 
 ## File Structure
 

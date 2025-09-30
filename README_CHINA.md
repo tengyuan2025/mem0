@@ -82,7 +82,7 @@ python test_chinese.py
 
 #### 添加记忆
 ```bash
-curl -X POST "http://localhost:8000/api/v1/memories/add" \
+curl -X POST "http://localhost:9000/api/v1/memories/add" \
   -H "Authorization: Bearer your-secret-key-change-this" \
   -H "Content-Type: application/json" \
   -d '{
@@ -96,7 +96,7 @@ curl -X POST "http://localhost:8000/api/v1/memories/add" \
 
 #### 搜索记忆
 ```bash
-curl -X POST "http://localhost:8000/api/v1/memories/search" \
+curl -X POST "http://localhost:9000/api/v1/memories/search" \
   -H "Authorization: Bearer your-secret-key-change-this" \
   -H "Content-Type: application/json" \
   -d '{
@@ -108,7 +108,7 @@ curl -X POST "http://localhost:8000/api/v1/memories/search" \
 
 #### 智能对话
 ```bash
-curl -X POST "http://localhost:8000/api/v1/chat" \
+curl -X POST "http://localhost:9000/api/v1/chat" \
   -H "Authorization: Bearer your-secret-key-change-this" \
   -H "Content-Type: application/json" \
   -d '{
@@ -150,7 +150,7 @@ python app_china.py  # 直接运行
 
 #### 生产环境
 ```bash
-uvicorn app_china:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn app_china:app --host 0.0.0.0 --port 9000 --workers 4
 ```
 
 #### Docker部署
@@ -168,7 +168,7 @@ CMD ["python", "app_china.py"]
 
 1. 启动API服务：`python app_china.py`
 2. 打开浏览器访问：`web_demo.html`
-3. 配置API地址为：`http://localhost:8000`
+3. 配置API地址为：`http://localhost:9000`
 
 ### 🔒 安全配置
 

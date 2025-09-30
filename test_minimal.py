@@ -13,7 +13,7 @@ os.environ.pop('https_proxy', None)
 os.environ.pop('HTTP_PROXY', None)
 os.environ.pop('HTTPS_PROXY', None)
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://localhost:9000"
 API_KEY = "your-secret-key-change-this"
 TEST_USER_ID = "test_user_001"
 

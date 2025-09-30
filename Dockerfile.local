@@ -44,7 +44,7 @@ class MemoryHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(response.encode())
 
 if __name__ == "__main__":
-    PORT = 8000
+    PORT = 9000
     with socketserver.TCPServer(("", PORT), MemoryHandler) as httpd:
         print(f"服务器启动在端口 {PORT}")
         httpd.serve_forever()
@@ -70,7 +70,7 @@ echo "🚀 启动mem0服务..."
 # 检查是否有完整的依赖
 if python3 -c "import fastapi, uvicorn" 2>/dev/null; then
     echo "✅ 完整依赖可用，启动完整应用..."
-    exec python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+    exec python3 -m uvicorn app:app --host 0.0.0.0 --port 9000
 else
     echo "⚠️ 完整依赖不可用，启动基础HTTP服务..."
     exec python3 /tmp/simple_app.py
@@ -80,11 +80,11 @@ EOF
 RUN chmod +x /app/start.sh
 
 # 暴露端口
-EXPOSE 8000
+EXPOSE 9000
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:9000/health || exit 1
 
 # 启动命令
 CMD ["/app/start.sh"]

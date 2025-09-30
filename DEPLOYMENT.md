@@ -256,7 +256,7 @@ docker-compose -f /opt/mem0/docker-compose.prod.yml logs -f mem0-api
 docker-compose -f docker-compose.prod.yml logs
 
 # 检查端口占用
-sudo netstat -tlnp | grep :8000
+sudo netstat -tlnp | grep :9000
 
 # 检查磁盘空间
 df -h
