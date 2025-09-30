@@ -39,6 +39,9 @@ from mysql_handler import MySQLHandler
 load_dotenv()  # 加载 .env
 load_dotenv('.env.local', override=True)  # 加载 .env.local 并覆盖同名变量
 
+# 禁用ChromaDB遥测以避免版本兼容性问题
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
 # 配置日志
 logger.remove()
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()

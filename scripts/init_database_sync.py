@@ -113,6 +113,33 @@ def init_database():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
                 
+                # 创建memory表（用于结构化记忆存储）
+                print("📝 创建memory表...")
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memory (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    memory_id VARCHAR(255) NOT NULL UNIQUE,
+                    user_id VARCHAR(255) NOT NULL,
+                    content TEXT NOT NULL,
+                    event TEXT,
+                    time TEXT,
+                    knowledge TEXT,
+                    skill TEXT,
+                    preference TEXT,
+                    metadata JSON,
+                    session_id INT,
+                    embedding_provider VARCHAR(100),
+                    llm_provider VARCHAR(100),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_memory_user_id (user_id),
+                    INDEX idx_memory_memory_id (memory_id),
+                    INDEX idx_memory_session_id (session_id),
+                    INDEX idx_memory_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+                print("✅ 创建memory表成功")
+                
                 conn.commit()
                 print("✅ 数据库初始化完成！")
                 
