@@ -61,17 +61,19 @@ jobs:
         echo "🐍 检查Python环境..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "python3 --version && pip3 --version"
         
-        # 停止旧服务
-        echo "🛑 停止旧服务..."
-        ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST "pkill -f 'uvicorn app:app' 2>/dev/null || true"
-        
-        # 使用git pull更新代码
-        echo "🔄 使用git方式更新服务器代码..."
-        
         # 在服务器上部署
         echo "🔧 在服务器上执行部署..."
         ssh -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'DEPLOY_SCRIPT'
-          set -e
+          # 不使用set -e，避免pkill导致脚本退出
+          
+          echo "🛑 停止旧服务..."
+          if pgrep -f "uvicorn app:app" > /dev/null 2>&1; then
+            echo "找到运行中的服务，正在停止..."
+            pkill -f "uvicorn app:app" || true
+            sleep 2
+          else
+            echo "没有发现运行中的服务"
+          fi
           
           echo "📂 准备部署目录..."
           mkdir -p /root/mem0/{data,logs,backups}
@@ -187,10 +189,19 @@ jobs:
           # 启动Python应用
           echo "🚀 启动Python应用..."
           
+          # 确保日志目录存在
+          mkdir -p logs
+          
           # 设置环境变量
-          export $(cat .env | grep -v '^#' | xargs) 2>/dev/null || true
+          if [ -f ".env" ]; then
+            export $(cat .env | grep -v '^#' | xargs) 2>/dev/null || true
+            echo "✅ 环境变量已加载"
+          else
+            echo "⚠️ .env文件不存在"
+          fi
           
           # 后台启动应用
+          echo "📝 启动命令: python3 -m uvicorn app:app --host 0.0.0.0 --port 8000"
           nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 > logs/app.log 2>&1 &
           APP_PID=$!
           echo "📝 应用进程ID: $APP_PID"
