@@ -244,6 +244,14 @@ jobs:
           # 创建必要的目录
           mkdir -p logs data/chroma data/huggingface data/transformers
           
+          # 升级SQLite3（ChromaDB需要>=3.35.0）
+          echo "🔧 检查并升级SQLite3..."
+          python3 -c "import sqlite3; print(f'当前SQLite版本: {sqlite3.sqlite_version}')"
+          
+          # 安装pysqlite3-binary来替代系统的sqlite3
+          echo "📦 安装pysqlite3-binary以支持ChromaDB..."
+          python3 -m pip install pysqlite3-binary
+          
           # 升级pip并安装依赖
           python3 -m pip install --upgrade pip
           

@@ -3,6 +3,20 @@ Mem0 自托管服务主应用
 支持国内LLM服务和本地向量数据库
 """
 
+# 首先修复SQLite版本问题（ChromaDB需要）
+import sys
+try:
+    import sqlite3
+    if sqlite3.sqlite_version < "3.35.0":
+        try:
+            import pysqlite3.dbapi2 as sqlite3
+            sys.modules['sqlite3'] = sqlite3
+            print(f"✅ 使用pysqlite3-binary，SQLite版本: {sqlite3.sqlite_version}")
+        except ImportError:
+            print(f"⚠️ SQLite版本过低 ({sqlite3.sqlite_version})，ChromaDB可能无法工作")
+except Exception as e:
+    print(f"⚠️ SQLite检查失败: {e}")
+
 from fastapi import FastAPI, HTTPException, Depends, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -11,7 +25,6 @@ from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 import os
-import sys
 from datetime import datetime
 import asyncio
 from contextlib import asynccontextmanager
