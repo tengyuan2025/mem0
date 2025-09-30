@@ -353,6 +353,34 @@ jobs:
               echo "✅ 服务启动成功！"
               echo "📝 进程状态:"
               ps aux | grep "uvicorn app:app" | grep -v grep || true
+              
+              # 检查端口对外访问
+              echo "🔍 检查端口对外访问配置..."
+              echo "📋 端口监听详情:"
+              netstat -tlnp | grep :9000 || echo "❌ 9000端口未监听"
+              
+              # 检查是否绑定到0.0.0.0
+              if netstat -tlnp | grep ":9000" | grep "0.0.0.0"; then
+                echo "✅ 端口9000正确绑定到0.0.0.0（可对外访问）"
+              else
+                echo "⚠️ 端口9000可能只绑定到127.0.0.1（仅本地访问）"
+                echo "📋 当前绑定情况:"
+                netstat -tlnp | grep ":9000"
+              fi
+              
+              # 检查防火墙
+              echo "📋 检查防火墙配置:"
+              if command -v ufw >/dev/null 2>&1; then
+                echo "UFW状态:"
+                ufw status | head -5
+                if ! ufw status | grep -q "9000"; then
+                  echo "⚠️ UFW中未发现9000端口规则，尝试添加..."
+                  ufw allow 9000 2>/dev/null || echo "❌ 无权限修改UFW规则"
+                fi
+              else
+                echo "未找到UFW防火墙"
+              fi
+              
               break
             else
               echo "⏳ 等待服务启动... ($i/12)"
