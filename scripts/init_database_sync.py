@@ -16,16 +16,37 @@ load_dotenv()
 def init_database():
     """初始化数据库和表结构"""
     
+    # 调试：显示环境变量
+    print("==== 数据库初始化脚本调试信息 ====")
+    print(f"📋 环境变量检查:")
+    print(f"  DATABASE_HOST = {os.getenv('DATABASE_HOST', '未设置')}")
+    print(f"  DATABASE_PORT = {os.getenv('DATABASE_PORT', '未设置')}")
+    print(f"  DATABASE_NAME = {os.getenv('DATABASE_NAME', '未设置')}")
+    print(f"  DATABASE_USER = {os.getenv('DATABASE_USER', '未设置')}")
+    print(f"  DATABASE_PASSWORD = {'已设置' if os.getenv('DATABASE_PASSWORD') else '未设置'}")
+    print(f"  MYSQL_HOST = {os.getenv('MYSQL_HOST', '未设置')}")
+    print(f"  MYSQL_PORT = {os.getenv('MYSQL_PORT', '未设置')}")
+    print(f"  MYSQL_DATABASE = {os.getenv('MYSQL_DATABASE', '未设置')}")
+    print(f"  MYSQL_USER = {os.getenv('MYSQL_USER', '未设置')}")
+    
     # 数据库配置
     config = {
-        'host': os.getenv('DATABASE_HOST', 'localhost'),
-        'port': int(os.getenv('DATABASE_PORT', 3306)),
-        'user': os.getenv('DATABASE_USER', 'root'),
-        'password': os.getenv('DATABASE_PASSWORD', ''),
+        'host': os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
+        'port': int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
+        'user': os.getenv('DATABASE_USER', os.getenv('MYSQL_USER', 'root')),
+        'password': os.getenv('DATABASE_PASSWORD', os.getenv('MYSQL_PASSWORD', '')),
         'charset': 'utf8mb4'
     }
     
-    db_name = os.getenv('DATABASE_NAME', 'mem0')
+    db_name = os.getenv('DATABASE_NAME', os.getenv('MYSQL_DATABASE', 'mem0'))
+    
+    print(f"📋 最终使用的配置:")
+    print(f"  host = {config['host']}")
+    print(f"  port = {config['port']}")
+    print(f"  user = {config['user']}")
+    print(f"  password = {'已设置' if config['password'] else '未设置'}")
+    print(f"  database = {db_name}")
+    print("====================================")
     
     print(f"🗄️ 开始初始化数据库: {config['host']}:{config['port']}")
     

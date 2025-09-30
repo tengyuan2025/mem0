@@ -6,6 +6,8 @@ Mem0 自托管服务主应用
 from fastapi import FastAPI, HTTPException, Depends, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 import os
@@ -316,13 +318,81 @@ class MemoryManager:
             # HuggingFace 本地模型
             from sentence_transformers import SentenceTransformer
             self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", os.getenv("HF_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"))
-            self.embedding_client = SentenceTransformer(self.embedding_model)
+            
+            # 处理模型加载错误
+            try:
+                logger.info(f"尝试加载HuggingFace模型: {self.embedding_model}")
+                
+                # 设置缓存目录
+                cache_dir = os.getenv("HF_HOME", "./data/huggingface")
+                os.makedirs(cache_dir, exist_ok=True)
+                
+                # 尝试加载模型
+                self.embedding_client = SentenceTransformer(
+                    self.embedding_model, 
+                    cache_folder=cache_dir,
+                    device='cpu'  # 明确指定使用CPU
+                )
+                logger.info(f"✅ 成功加载HuggingFace模型: {self.embedding_model}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 无法加载模型 {self.embedding_model}: {e}")
+                
+                # 回退到更可靠的模型
+                fallback_model = "paraphrase-multilingual-MiniLM-L12-v2"
+                logger.info(f"尝试回退模型: {fallback_model}")
+                
+                try:
+                    self.embedding_model = fallback_model
+                    self.embedding_client = SentenceTransformer(
+                        self.embedding_model,
+                        cache_folder=cache_dir,
+                        device='cpu'
+                    )
+                    logger.info(f"✅ 成功加载回退模型: {self.embedding_model}")
+                except Exception as e2:
+                    logger.error(f"❌ 无法加载回退模型: {e2}")
+                    raise RuntimeError(f"无法初始化Embedding模型: {e2}")
             
         elif embedding_provider == "sentence_transformers":
             # Sentence Transformers 本地模型
             from sentence_transformers import SentenceTransformer
-            self.embedding_model = os.getenv("ST_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
-            self.embedding_client = SentenceTransformer(self.embedding_model)
+            self.embedding_model = os.getenv("MEM0_EMBEDDER_MODEL", os.getenv("ST_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"))
+            
+            # 处理模型加载错误
+            try:
+                logger.info(f"尝试加载Embedding模型: {self.embedding_model}")
+                
+                # 设置缓存目录
+                cache_dir = os.getenv("HF_HOME", "./data/huggingface")
+                os.makedirs(cache_dir, exist_ok=True)
+                
+                # 尝试加载模型
+                self.embedding_client = SentenceTransformer(
+                    self.embedding_model, 
+                    cache_folder=cache_dir,
+                    device='cpu'  # 明确指定使用CPU
+                )
+                logger.info(f"✅ 成功加载Embedding模型: {self.embedding_model}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 无法加载模型 {self.embedding_model}: {e}")
+                
+                # 回退到更可靠的模型
+                fallback_model = "paraphrase-multilingual-MiniLM-L12-v2"
+                logger.info(f"尝试回退模型: {fallback_model}")
+                
+                try:
+                    self.embedding_model = fallback_model
+                    self.embedding_client = SentenceTransformer(
+                        self.embedding_model,
+                        cache_folder=cache_dir,
+                        device='cpu'
+                    )
+                    logger.info(f"✅ 成功加载回退模型: {self.embedding_model}")
+                except Exception as e2:
+                    logger.error(f"❌ 无法加载回退模型: {e2}")
+                    raise RuntimeError(f"无法初始化Embedding模型: {e2}")
             
         elif embedding_provider == "openai":
             # OpenAI Embedding
@@ -1103,12 +1173,14 @@ async def lifespan(app: FastAPI):
         await memory_manager.mysql_handler.close()
     logger.info("Mem0服务正在关闭")
 
-# 创建FastAPI应用
+# 创建FastAPI应用（禁用默认文档，使用自定义本地文档）
 app = FastAPI(
     title="Mem0 自托管服务",
     description="支持国内LLM服务的智能记忆系统",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None,  # 禁用默认的docs
+    redoc_url=None  # 禁用默认的redoc
 )
 
 # 配置CORS
@@ -1119,6 +1191,39 @@ app.add_middleware(
     allow_methods=json.loads(os.getenv("CORS_ALLOW_METHODS", '["*"]')),
     allow_headers=json.loads(os.getenv("CORS_ALLOW_HEADERS", '["*"]')),
 )
+
+# 挂载静态文件目录（用于本地加载Swagger和ReDoc资源）
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    logger.info("✅ 已挂载本地静态资源目录: /static")
+    
+    # 自定义Swagger UI文档路由（使用本地资源）
+    @app.get("/docs", include_in_schema=False)
+    async def custom_swagger_ui_html():
+        return get_swagger_ui_html(
+            openapi_url="/openapi.json",
+            title=app.title + " - Swagger UI",
+            swagger_js_url="/static/swagger/swagger-ui-bundle.js",
+            swagger_css_url="/static/swagger/swagger-ui.css",
+            swagger_favicon_url="/static/swagger/favicon-32x32.png",
+        )
+    
+    # 自定义ReDoc文档路由（使用本地资源）
+    @app.get("/redoc", include_in_schema=False)
+    async def custom_redoc_html():
+        return get_redoc_html(
+            openapi_url="/openapi.json",
+            title=app.title + " - ReDoc",
+            redoc_js_url="/static/redoc/redoc.standalone.js",
+            redoc_favicon_url="/static/swagger/favicon-32x32.png",
+        )
+    
+    logger.info("✅ 已配置本地化API文档页面: /docs 和 /redoc")
+else:
+    # 如果没有本地资源，使用默认CDN
+    app.docs_url = "/docs"
+    app.redoc_url = "/redoc"
+    logger.warning("⚠️ 未找到本地静态资源目录，使用CDN加载文档资源")
 
 # 安全认证
 security = HTTPBearer()

@@ -135,6 +135,12 @@ jobs:
               API_SECRET=$(openssl rand -hex 32)
               sed -i "s/your-super-secret-key-change-this-in-production/$API_SECRET/g" .env
             fi
+            
+            # 调试：显示替换后的结果
+            echo "📋 环境变量替换后的.env内容（数据库相关）："
+            grep -E "DATABASE_|MYSQL_|ENABLE_MYSQL" .env || echo "没有找到数据库配置"
+          else
+            echo "❌ .env文件不存在，无法替换环境变量！"
           fi
           
           # 初始化数据库（在环境变量替换后执行）
@@ -149,18 +155,62 @@ jobs:
           
           # 验证环境变量是否正确替换
           echo "🔍 验证数据库配置..."
+          echo "==== 开始调试数据库配置 ===="
+          
+          # 1. 检查.env文件是否存在
           if [ -f ".env" ]; then
-            grep "DATABASE_HOST" .env | head -1 || echo "⚠️ DATABASE_HOST未找到"
-            grep "DATABASE_USER" .env | head -1 || echo "⚠️ DATABASE_USER未找到"
+            echo "✅ .env文件存在"
+            echo "📋 .env文件中的数据库配置："
+            grep "DATABASE_" .env || echo "❌ 没有找到DATABASE_配置"
+            grep "MYSQL_" .env || echo "❌ 没有找到MYSQL_配置"
+            grep "ENABLE_MYSQL" .env || echo "❌ 没有找到ENABLE_MYSQL配置"
+          else
+            echo "❌ .env文件不存在！"
+            ls -la | grep -E "\.env" || echo "目录中没有任何.env文件"
           fi
+          
+          # 2. 检查环境变量
+          echo "📋 当前环境变量（数据库相关）："
+          echo "DATABASE_HOST=${DATABASE_HOST:-未设置}"
+          echo "DATABASE_PORT=${DATABASE_PORT:-未设置}"
+          echo "DATABASE_NAME=${DATABASE_NAME:-未设置}"
+          echo "DATABASE_USER=${DATABASE_USER:-未设置}"
+          echo "DATABASE_PASSWORD=${DATABASE_PASSWORD:+已设置}"
+          
+          # 3. 导出环境变量
+          echo "📝 尝试导出环境变量..."
+          if [ -f ".env" ]; then
+            # 显示要导出的变量
+            echo "准备导出的变量："
+            cat .env | grep -v '^#' | grep -E "DATABASE_|MYSQL_|ENABLE_" || echo "没有找到相关变量"
+            
+            # 导出变量
+            export $(cat .env | grep -v '^#' | xargs) 2>/dev/null || echo "⚠️ 导出环境变量失败"
+            
+            # 再次检查
+            echo "📋 导出后的环境变量："
+            echo "DATABASE_HOST=${DATABASE_HOST:-未设置}"
+            echo "DATABASE_PORT=${DATABASE_PORT:-未设置}"
+            echo "DATABASE_NAME=${DATABASE_NAME:-未设置}"
+            echo "DATABASE_USER=${DATABASE_USER:-未设置}"
+            echo "DATABASE_PASSWORD=${DATABASE_PASSWORD:+已设置}"
+          fi
+          
+          echo "==== 结束调试数据库配置 ===="
           
           # 执行数据库初始化
           if [ -f "scripts/init_database_sync.py" ]; then
             echo "📝 使用同步版本初始化数据库..."
+            # 显示脚本将使用的环境变量
+            DATABASE_HOST="${DATABASE_HOST}" DATABASE_PORT="${DATABASE_PORT}" \
+            DATABASE_NAME="${DATABASE_NAME}" DATABASE_USER="${DATABASE_USER}" \
+            DATABASE_PASSWORD="${DATABASE_PASSWORD}" \
             python3 scripts/init_database_sync.py || echo "⚠️ 数据库初始化失败，但继续部署"
           elif [ -f "scripts/init_database.py" ]; then
             echo "📝 使用异步版本初始化数据库..."
             python3 scripts/init_database.py || echo "⚠️ 数据库初始化失败，但继续部署"
+          else
+            echo "⚠️ 没有找到数据库初始化脚本"
           fi
           
           # 安装Python依赖
