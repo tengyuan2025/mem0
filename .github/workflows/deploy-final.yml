@@ -186,9 +186,9 @@ jobs:
           if [ -f ".env" ]; then
             echo "✅ .env文件存在"
             echo "📋 .env文件中的数据库配置："
-            grep "DATABASE_" .env || echo "❌ 没有找到DATABASE_配置"
-            grep "MYSQL_" .env || echo "❌ 没有找到MYSQL_配置"
-            grep "ENABLE_MYSQL" .env || echo "❌ 没有找到ENABLE_MYSQL配置"
+            grep "DATABASE_" .env || echo "⚠️ 没有找到DATABASE_配置"
+            # 不再检查MYSQL_配置，因为我们使用DATABASE_配置
+            grep "ENABLE_MYSQL" .env || echo "⚠️ 没有找到ENABLE_MYSQL配置"
           else
             echo "❌ .env文件不存在！"
             ls -la | grep -E "\.env" || echo "目录中没有任何.env文件"

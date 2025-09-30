@@ -18,16 +18,12 @@ def init_database():
     
     # 调试：显示环境变量
     print("==== 数据库初始化脚本调试信息 ====")
-    print(f"📋 环境变量检查:")
+    print(f"📋 数据库配置检查:")
     print(f"  DATABASE_HOST = {os.getenv('DATABASE_HOST', '未设置')}")
     print(f"  DATABASE_PORT = {os.getenv('DATABASE_PORT', '未设置')}")
     print(f"  DATABASE_NAME = {os.getenv('DATABASE_NAME', '未设置')}")
     print(f"  DATABASE_USER = {os.getenv('DATABASE_USER', '未设置')}")
     print(f"  DATABASE_PASSWORD = {'已设置' if os.getenv('DATABASE_PASSWORD') else '未设置'}")
-    print(f"  MYSQL_HOST = {os.getenv('MYSQL_HOST', '未设置')}")
-    print(f"  MYSQL_PORT = {os.getenv('MYSQL_PORT', '未设置')}")
-    print(f"  MYSQL_DATABASE = {os.getenv('MYSQL_DATABASE', '未设置')}")
-    print(f"  MYSQL_USER = {os.getenv('MYSQL_USER', '未设置')}")
     
     # 数据库配置
     config = {
