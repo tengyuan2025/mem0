@@ -279,31 +279,8 @@ jobs:
             echo "使用项目自带的模型下载脚本..."
             python3 download_chinese_model.py || echo "⚠️ 中文模型下载失败，运行时会自动重试"
           else
-            echo "创建临时模型下载脚本..."
-            python3 -c "
-import os
-import sys
-try:
-    from sentence_transformers import SentenceTransformer
-    cache_dir = os.getenv('HF_HOME', './data/huggingface')
-    os.makedirs(cache_dir, exist_ok=True)
-    print('📥 正在下载模型: shibing624/text2vec-base-chinese')
-    print('📁 缓存目录:', cache_dir)
-    print('🌐 使用镜像:', os.getenv('HF_ENDPOINT', 'HuggingFace官方'))
-    model = SentenceTransformer('shibing624/text2vec-base-chinese', cache_folder=cache_dir, device='cpu')
-    print('✅ 模型下载成功!')
-    test_text = '这是一个测试文本'
-    embedding = model.encode(test_text)
-    print('✅ 测试成功! 向量维度:', len(embedding))
-except Exception as e:
-    print('❌ 下载失败:', e)
-    try:
-        print('🔄 尝试下载备用模型...')
-        backup_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', cache_folder=cache_dir, device='cpu')
-        print('✅ 备用模型下载成功!')
-    except Exception as e2:
-        print('❌ 备用模型也下载失败:', e2)
-"
+            echo "尝试简单的模型预热..."
+            python3 -c "from sentence_transformers import SentenceTransformer; import os; SentenceTransformer('shibing624/text2vec-base-chinese', cache_folder=os.getenv('HF_HOME', './data/huggingface'), device='cpu')" || echo "⚠️ 模型预下载失败，运行时会自动重试"
           fi
           
           # 启动Python应用
