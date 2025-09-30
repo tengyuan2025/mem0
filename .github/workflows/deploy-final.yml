@@ -338,11 +338,19 @@ jobs:
           # 设置HuggingFace镜像（运行时也使用）
           export HF_ENDPOINT=https://hf-mirror.com
           
-          # 后台启动应用（使用应用内置启动方式）
-          echo "📝 启动命令: python3 app.py"
+          # 后台启动应用（使用与8000端口相同的方式）
+          echo "📝 启动命令: python3 -m uvicorn app:app --host 0.0.0.0 --port 9000"
           echo "📝 配置检查:"
           grep -E "APP_HOST|APP_PORT" .env || echo "未找到端口配置"
-          nohup python3 app.py > logs/app.log 2>&1 &
+          
+          # 检查是否有app用户，如果有则使用app用户启动
+          if id "app" &>/dev/null; then
+            echo "📝 使用app用户启动服务（与8000端口一致）"
+            sudo -u app nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 &
+          else
+            echo "📝 使用root用户启动服务"
+            nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 &
+          fi
           APP_PID=$!
           echo "📝 应用进程ID: $APP_PID"
           echo $APP_PID > mem0_app.pid
