@@ -371,14 +371,27 @@ jobs:
           # 检查是否有app用户，如果有则使用app用户启动
           if id "app" &>/dev/null; then
             echo "📝 使用app用户启动服务（与8000端口一致）"
-            sudo -u app nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 &
+            sudo -u app bash -c 'nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 & echo $! > mem0_app.pid'
           else
             echo "📝 使用root用户启动服务"
             nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 &
+            APP_PID=$!
+            echo "📝 应用进程ID: $APP_PID"
+            echo $APP_PID > mem0_app.pid
           fi
-          APP_PID=$!
-          echo "📝 应用进程ID: $APP_PID"
-          echo $APP_PID > mem0_app.pid
+          
+          # 验证PID文件和进程
+          if [ -f "mem0_app.pid" ]; then
+            ACTUAL_PID=$(cat mem0_app.pid)
+            echo "📝 记录的进程ID: $ACTUAL_PID"
+            if kill -0 "$ACTUAL_PID" 2>/dev/null; then
+              echo "✅ 进程正在运行"
+            else
+              echo "❌ 进程启动失败"
+            fi
+          else
+            echo "❌ PID文件创建失败"
+          fi
           
           # 健康检查
           echo "🔍 健康检查..."
@@ -427,6 +440,29 @@ jobs:
                 ps aux | grep "uvicorn" | grep -v grep || echo "未找到uvicorn进程"
                 echo "📝 端口占用:"
                 netstat -tlnp | grep :9000 || ss -tlnp | grep :9000 || echo "端口9000未被占用"
+                
+                echo "🔄 尝试重新启动服务..."
+                # 再次停止所有相关进程
+                pkill -f "uvicorn app:app" 2>/dev/null || true
+                pkill -f "python.*app\.py" 2>/dev/null || true
+                sleep 3
+                
+                # 重新启动
+                echo "📝 重新启动服务..."
+                nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 9000 > logs/app.log 2>&1 &
+                NEW_PID=$!
+                echo $NEW_PID > mem0_app.pid
+                echo "📝 新进程ID: $NEW_PID"
+                
+                # 再次等待和检查
+                sleep 10
+                if curl -f http://localhost:9000/health 2>/dev/null; then
+                  echo "✅ 重启后服务正常！"
+                else
+                  echo "❌ 重启后服务仍然无法访问"
+                  echo "📝 最新日志:"
+                  tail -50 logs/app.log 2>/dev/null || echo "无法读取日志"
+                fi
               fi
             fi
           done
