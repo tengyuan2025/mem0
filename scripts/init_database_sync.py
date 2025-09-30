@@ -51,15 +51,26 @@ def init_database():
     print(f"🗄️ 开始初始化数据库: {config['host']}:{config['port']}")
     
     try:
-        # 连接到MySQL服务器（不指定数据库）
+        # 首先尝试创建数据库（如果有权限）
+        try:
+            conn = pymysql.connect(**config)
+            with conn.cursor() as cursor:
+                print(f"📝 尝试创建数据库: {db_name}")
+                cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                print(f"✅ 数据库创建成功或已存在")
+            conn.close()
+        except pymysql.err.OperationalError as e:
+            if e.args[0] == 1044:  # Access denied
+                print(f"⚠️ 无CREATE DATABASE权限（阿里云RDS模式），假设数据库已存在")
+            else:
+                raise
+        
+        # 连接到指定数据库
+        config['database'] = db_name
         conn = pymysql.connect(**config)
         
         try:
             with conn.cursor() as cursor:
-                # 创建数据库
-                print(f"📝 创建数据库: {db_name}")
-                cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                cursor.execute(f"USE {db_name}")
                 
                 # 创建用户记忆表
                 print("📝 创建用户记忆表...")

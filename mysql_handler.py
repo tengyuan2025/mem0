@@ -24,24 +24,30 @@ class MySQLHandler:
             return
             
         try:
-            # 先连接到MySQL服务器（不指定数据库）来创建数据库
-            temp_pool = await aiomysql.create_pool(
-                host=os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
-                port=int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
-                user=os.getenv('DATABASE_USER', os.getenv('MYSQL_USER', 'root')),
-                password=os.getenv('DATABASE_PASSWORD', os.getenv('MYSQL_PASSWORD', '123456')),
-                charset='utf8mb4',
-                autocommit=True,
-                minsize=1,
-                maxsize=10
-            )
-            
-            # 创建数据库（如果不存在）
-            await self._ensure_database_with_pool(temp_pool)
-            
-            # 关闭临时连接池
-            temp_pool.close()
-            await temp_pool.wait_closed()
+            # 尝试创建数据库（如果有权限）
+            try:
+                temp_pool = await aiomysql.create_pool(
+                    host=os.getenv('DATABASE_HOST', os.getenv('MYSQL_HOST', 'localhost')),
+                    port=int(os.getenv('DATABASE_PORT', os.getenv('MYSQL_PORT', 3306))),
+                    user=os.getenv('DATABASE_USER', os.getenv('MYSQL_USER', 'root')),
+                    password=os.getenv('DATABASE_PASSWORD', os.getenv('MYSQL_PASSWORD', '123456')),
+                    charset='utf8mb4',
+                    autocommit=True,
+                    minsize=1,
+                    maxsize=10
+                )
+                
+                # 创建数据库（如果不存在）
+                await self._ensure_database_with_pool(temp_pool)
+                
+                # 关闭临时连接池
+                temp_pool.close()
+                await temp_pool.wait_closed()
+            except aiomysql.Error as e:
+                if "Access denied" in str(e):
+                    logger.warning("无CREATE DATABASE权限（阿里云RDS模式），假设数据库已存在")
+                else:
+                    raise
             
             # 创建连接到指定数据库的连接池
             self.pool = await aiomysql.create_pool(
