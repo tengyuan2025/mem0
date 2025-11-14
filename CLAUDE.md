@@ -12,11 +12,12 @@ mem0 is a self-hosted intelligent memory system for AI assistants and agents, op
 
 1. **Memory Manager** (`app.py:99-500`) - Centralized memory operations handling CRUD operations and vector search
 2. **Provider System** - Factory pattern for swappable LLMs, embeddings, and vector stores:
-   - LLMs: DashScope (Alibaba), QianFan (Baidu), ZhipuAI, DeepSeek, OpenAI
-   - Embeddings: Local HuggingFace models (BAAI/bge-*), API-based embeddings
-   - Vector DBs: ChromaDB, Qdrant, FAISS
+   - LLMs: DashScope (Alibaba), QianFan (Baidu), ZhipuAI, DeepSeek, Moonshot, OpenAI
+   - Embeddings: Local HuggingFace models (BAAI/bge-*), API-based embeddings, Sentence Transformers
+   - Vector DBs: ChromaDB, Qdrant, FAISS, Milvus (optional)
+   - Graph DBs: Neo4j (knowledge graphs)
 3. **API Layer** (`app.py:600-1200`) - FastAPI-based RESTful endpoints with JWT authentication
-4. **Storage Layer** - MySQL/SQLite for metadata, vector databases for embeddings
+4. **Storage Layer** - MySQL/SQLite for metadata, vector databases for embeddings, Redis for caching
 
 ### Key Design Patterns
 
@@ -39,44 +40,58 @@ pip install -r requirements.txt
 # Copy and configure environment
 cp .env.example .env
 # Edit .env to configure your LLM providers and API keys
+
+# Download Chinese models (for local embeddings)
+python download_chinese_model.py
+python download_models.py
 ```
 
 ### Running the Service
 ```bash
-# Start API server
+# Start API server using the automated script (recommended)
+chmod +x start.sh
+./start.sh
+
+# Or start manually
 python app.py
 
-# Start with Docker Compose (includes all databases)
-docker-compose up -d
-
-# Use the interactive start script
-./start.sh
+# Start database services only (if needed)
+docker-compose -f docker-compose-db.yml up -d
 ```
 
 ### Testing
 ```bash
 # Run specific test file
-python test_chinese.py      # Test Chinese language processing
-python test_api.py          # Test API endpoints
-python test_minimal.py      # Basic functionality test
-python test_multiuser_memory.py  # Multi-user scenarios
+python test/test_chinese.py           # Test Chinese language processing
+python test/test_api.py               # Test API endpoints  
+python test/test_minimal.py           # Basic functionality test
+python test/test_multiuser_memory.py  # Multi-user scenarios
+python test/test_mysql.py             # MySQL database operations
+python test/test_embedding.py         # Embedding models test
 
-# Run pytest (if tests are properly configured)
-pytest -v
+# Health check
+python check_health.py
 
-# Test API endpoints manually
-python test_api.py
+# Inspect ChromaDB data
+python inspect_chromadb.py
 ```
 
-### Docker Operations
+### Database Services (Docker)
 ```bash
-# Build and run with Docker Compose
-docker-compose up -d        # Start all services
-docker-compose logs -f mem0-api  # View API logs
-docker-compose down         # Stop all services
+# Start database services for local development
+docker-compose -f docker-compose-db.yml up -d
 
-# China-specific deployment
-docker-compose -f docker-compose-china.yml up -d
+# Check database service status
+docker-compose -f docker-compose-db.yml ps
+
+# View database logs
+docker-compose -f docker-compose-db.yml logs -f
+
+# Stop database services
+docker-compose -f docker-compose-db.yml down
+
+# Start specific database services
+docker-compose -f docker-compose-db.yml up -d postgres redis chromadb neo4j
 ```
 
 ## Configuration
@@ -84,23 +99,34 @@ docker-compose -f docker-compose-china.yml up -d
 ### Environment Variables (.env)
 
 Key configuration sections:
-- **LLM_PROVIDER**: Choose from `dashscope`, `qianfan`, `zhipu`, `deepseek`, `openai`
+- **LLM_PROVIDER**: Choose from `dashscope`, `qianfan`, `zhipu`, `deepseek`, `moonshot`, `openai`
 - **EMBEDDING_PROVIDER**: Use `local_huggingface` for offline, or provider-specific embeddings
-- **VECTOR_DB**: Select `chroma`, `qdrant`, or `faiss`
-- **API_SECRET_KEY**: Required for API authentication
+- **VECTOR_DB**: Select `chroma`, `qdrant`, `faiss`, or `milvus`
+- **API_SECRET_KEY**: Required for API authentication (JWT)
 - **Database configs**: MySQL, PostgreSQL, Redis settings
+- **CORS settings**: Configure allowed origins for web clients
 
 ### Provider Configuration Examples
 
 ```env
-# DashScope (Alibaba Cloud)
+# DashScope (Alibaba Cloud) - Recommended
 LLM_PROVIDER=dashscope
 DASHSCOPE_API_KEY=your-key
 DASHSCOPE_MODEL=qwen-max
 
-# Local Chinese Embeddings (no API needed)
+# Local Chinese Embeddings (no API needed) - Recommended
 EMBEDDING_PROVIDER=local_huggingface
 HF_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+
+# Alternative Chinese embedding models
+# BAAI/bge-large-zh-v1.5 - Best quality (1.3GB)
+# BAAI/bge-base-zh-v1.5 - Balanced (400MB) 
+# BAAI/bge-small-zh-v1.5 - Fastest (95MB)
+
+# Redis caching (optional but recommended)
+REDIS_ENABLED=true
+REDIS_HOST=redis
+REDIS_PORT=6379
 ```
 
 ## API Endpoints
@@ -120,16 +146,20 @@ Full API documentation available at `http://localhost:9000/docs` when running.
 
 ```
 mem0/
-├── app.py                 # Main FastAPI application
-├── mysql_handler.py       # MySQL database operations
-├── mem0/                  # Core package (provider implementations)
-│   ├── memory/           # Memory CRUD operations
-│   ├── llms/            # LLM provider implementations
-│   ├── embeddings/      # Embedding providers
-│   └── vector_stores/   # Vector database implementations
-├── test_*.py             # Test files for different features
-├── docker-compose*.yml   # Docker deployment configs
-└── start.sh             # Interactive startup script
+├── app.py                      # Main FastAPI application
+├── mysql_handler.py            # MySQL database operations
+├── mem0/                       # Core package (provider implementations)
+│   ├── memory/                # Memory CRUD operations
+│   ├── llms/                 # LLM provider implementations
+│   ├── embeddings/           # Embedding providers
+│   └── vector_stores/        # Vector database implementations
+├── test/                       # Test files for different features
+│   ├── test_api.py           # API endpoint tests
+│   ├── test_chinese.py       # Chinese language tests
+│   ├── test_minimal.py       # Basic functionality tests
+│   └── ...                   # Other test modules
+├── docker-compose-db.yml       # Database services configuration
+└── start.sh                    # Local Python environment startup script
 ```
 
 ## Important Considerations
@@ -139,3 +169,16 @@ mem0/
 - **Provider Selection**: Choose appropriate LLM/embedding providers based on deployment region
 - **Data Privacy**: All data can be stored locally when using local embeddings and FAISS
 - **Performance**: Use Redis caching and appropriate worker counts for production deployments
+- **Memory Scope**: Memories can be scoped by user_id, session_id, and custom metadata filters
+- **Monitoring**: Prometheus metrics integration available, health check endpoints at `/health`
+- **Deployment Mode**: Local Python environment with optional Docker for database services
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Port conflicts**: Check ports 9000 (API), 8001 (ChromaDB), 6333 (Qdrant) are available
+2. **Model download failures**: First-time setup downloads models (~1-2GB), ensure stable connection
+3. **Database connection issues**: Verify database services are running with `docker-compose -f docker-compose-db.yml ps`
+4. **Memory errors**: Ensure adequate system memory for large embedding models
+5. **API authentication**: Ensure Bearer token is included in request headers

@@ -21,34 +21,23 @@
 
 ## 🚀 快速开始
 
-### 方式一：Docker Compose部署（推荐）
+### 本地Python环境启动
 
-1. **克隆项目**
-```bash
-git clone <your-repo>
-cd mem0
-```
+#### 方式A：使用自动化脚本（推荐）
 
-2. **配置环境变量**
-```bash
-cp .env.example .env
-# 编辑 .env 文件，配置您的LLM API密钥
-vim .env
-```
-
-3. **启动服务**
 ```bash
 chmod +x start.sh
 ./start.sh
-# 选择选项 1 (Docker Compose)
 ```
 
-4. **测试服务**
-```bash
-python test_api.py
-```
+脚本将自动完成：
+- 检查Python环境
+- 创建虚拟环境
+- 安装依赖
+- 启动数据库服务（可选）
+- 启动API服务
 
-### 方式二：本地Python环境
+#### 方式B：手动启动
 
 1. **安装依赖**
 ```bash
@@ -63,11 +52,12 @@ cp .env.example .env
 vim .env
 ```
 
-3. **启动必要的服务**
+3. **启动必要的数据库服务**
 ```bash
-# 需要手动启动PostgreSQL、Redis、ChromaDB等服务
-# 或使用docker-compose只启动数据库服务：
-docker-compose up -d postgres redis chromadb neo4j
+# 使用docker-compose启动数据库服务：
+docker-compose -f docker-compose-db.yml up -d
+
+# 或手动启动PostgreSQL、Redis、ChromaDB等服务
 ```
 
 4. **启动API服务**
@@ -243,10 +233,14 @@ Content-Type: application/json
 - 操作系统：Ubuntu 20.04/22.04 或 CentOS 7/8
 - 开放端口：9000（API）、8001（ChromaDB，可选）
 
-### 2. 安装Docker
+### 2. 安装依赖
 
 ```bash
-# Ubuntu
+# 安装Python 3.9+
+sudo apt update
+sudo apt install python3 python3-pip python3-venv
+
+# 安装Docker（仅用于数据库服务）
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 
@@ -271,11 +265,16 @@ cd /home/user/mem0
 cp .env.example .env
 vim .env  # 配置您的API密钥
 
-# 启动服务
-docker-compose up -d
+# 使用启动脚本
+chmod +x start.sh
+./start.sh
 
-# 查看日志
-docker-compose logs -f mem0-api
+# 或手动启动
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+docker-compose -f docker-compose-db.yml up -d  # 启动数据库
+python app.py  # 启动API服务
 ```
 
 ### 4. 配置Nginx反向代理（可选）
@@ -309,36 +308,38 @@ sudo certbot --nginx -d your-domain.com
 
 ## 🔍 监控和维护
 
-### 查看服务状态
+### 查看数据库服务状态
 ```bash
-docker-compose ps
+docker-compose -f docker-compose-db.yml ps
 ```
 
-### 查看日志
+### 查看数据库日志
 ```bash
-# 所有服务
-docker-compose logs
+# 所有数据库服务
+docker-compose -f docker-compose-db.yml logs
 
 # 特定服务
-docker-compose logs -f mem0-api
+docker-compose -f docker-compose-db.yml logs -f postgres
+docker-compose -f docker-compose-db.yml logs -f redis
+docker-compose -f docker-compose-db.yml logs -f chromadb
 ```
 
 ### 备份数据
 ```bash
 # 备份PostgreSQL
-docker-compose exec postgres pg_dump -U mem0 mem0_db > backup.sql
+docker-compose -f docker-compose-db.yml exec postgres pg_dump -U mem0 mem0_db > backup.sql
 
 # 备份向量数据库
-docker-compose exec chromadb tar -czf /tmp/chroma-backup.tar.gz /chroma/data
+docker-compose -f docker-compose-db.yml exec chromadb tar -czf /tmp/chroma-backup.tar.gz /chroma/data
 docker cp mem0-chromadb:/tmp/chroma-backup.tar.gz ./
 ```
 
 ### 更新服务
 ```bash
 git pull
-docker-compose down
-docker-compose build
-docker-compose up -d
+pip install -r requirements.txt
+# 重启API服务
+python app.py
 ```
 
 ## 🐛 故障排查
@@ -355,13 +356,13 @@ sudo lsof -i :8001
 
 - 检查API密钥是否正确
 - 检查网络连接
-- 查看详细日志：`docker-compose logs mem0-api`
+- 查看API服务日志输出
 
 ### 3. 向量数据库连接失败
 
 确保ChromaDB服务正在运行：
 ```bash
-docker-compose ps chromadb
+docker-compose -f docker-compose-db.yml ps chromadb
 curl http://localhost:8001/api/v1/heartbeat
 ```
 
@@ -369,9 +370,9 @@ curl http://localhost:8001/api/v1/heartbeat
 
 ### 1. 增加并发处理能力
 
-编辑 `Dockerfile`，修改启动命令：
-```dockerfile
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "4"]
+在启动API服务时使用多个worker：
+```bash
+uvicorn app:app --host 0.0.0.0 --port 9000 --workers 4
 ```
 
 ### 2. 配置Redis缓存
@@ -401,7 +402,7 @@ MIT License
 如有问题，请：
 1. 查看[故障排查](#-故障排查)部分
 2. 提交GitHub Issue
-3. 查看日志：`docker-compose logs`
+3. 查看API服务日志输出
 
 ---
 
