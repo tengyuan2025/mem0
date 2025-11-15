@@ -16,7 +16,7 @@ try:
             print(f"⚠️ SQLite版本过低 ({sqlite3.sqlite_version})，ChromaDB可能无法工作")
 except Exception as e:
     print(f"⚠️ SQLite检查失败: {e}")
-
+1111
 from fastapi import FastAPI, HTTPException, Depends, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
